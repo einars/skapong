@@ -22,9 +22,6 @@ let tau = 6.2831852
 
 let rad_of_angle a = float a *. tau /. 360.0
 
-let log m  = kprintf (fun m -> printf "%s\n%!" m) m
-let ilog m = kprintf (fun m -> ()) m (* ignore log *)
-
 let half x = x / 2
 let middle_of a b = ( a + b ) / 2
 
@@ -75,6 +72,8 @@ let gamestate_clean =
 
 type the =
   { screen:        dimensions
+  ; mutable debug:      bool
+  ; mutable fullscreen: bool
   ; field:         dimensions
   ; paddle:        dimensions
   ; start_time:    float
@@ -102,8 +101,13 @@ let the =
   ; game_prev  = gamestate_clean
   ; start_time = Unix.gettimeofday ()
   ; states     = Hashtbl.create 4
-  ; hz         = 20
+  ; hz         = 15
+  ; fullscreen = false
+  ; debug      = false
   }
+
+let log m  = kprintf (fun m -> try printf "%s\n%!" m with _ -> () ) m
+let ilog m = kprintf (fun m -> if the.debug then log "%s" m) m (* ignore log *)
 
 
 let restart_game () =
@@ -125,11 +129,20 @@ let init_gl () =
   glMatrixMode gl_projection;
   glLoadIdentity ();
   glDisable gl_depth_test;
-
-  restart_game ();
   gl_resize ()
 
+let init_video () =
+  let flags = (if the.fullscreen then [OPENGL; FULLSCREEN] else [OPENGL]) in
+  ignore( set_video_mode the.screen.width the.screen.height 32 flags );
+  init_gl ()
 
+let toggle_fullscreen () =
+  the.fullscreen <- not the.fullscreen;
+  init_video ()
+
+let toggle_debug () =
+  the.debug <- not the.debug;
+  log "debug %s" (if the.debug then "on" else "off")
 
 let draw_paddle x y is_computer =
   let xx = float x
@@ -222,8 +235,8 @@ let calc_next_state os percent_frame =
       let move_up = os.p1_pos + half the.paddle.height < hit_y
       and move_dn = os.p1_pos - half the.paddle.height > hit_y in
       os.p1_move <- "none";
-      if move_up then os.p1_move <- "up";
-      if move_dn then os.p1_move <- "down";
+      if move_up && hit_y < 2 * the.field.height then os.p1_move <- "up";
+      if move_dn && hit_y > - 2 * the.field.height then os.p1_move <- "down";
     );
 
 
@@ -233,9 +246,11 @@ let calc_next_state os percent_frame =
       let move_up = os.p2_pos + half the.paddle.height < hit_y
       and move_dn = os.p2_pos - half the.paddle.height > hit_y in
       os.p2_move <- "none";
-      if move_up then os.p2_move <- "up";
-      if move_dn then os.p2_move <- "down";
+      if move_up && hit_y < 2 * the.field.height then os.p2_move <- "up";
+      if move_dn && hit_y > - 2 * the.field.height then os.p2_move <- "down";
     );
+
+
 
     if os.p1_move = "up"        then ns.p1_pos <- os.p1_pos + inc
     else if os.p1_move = "down" then ns.p1_pos <- os.p1_pos - inc;
@@ -254,6 +269,7 @@ let calc_next_state os percent_frame =
     (* check reflections *)
 
     if !ny <= 0 || !ny >= the.field.height then (
+      (* tk properly calculate the return position *)
       ny := by;
       dy := - !dy;
       ns.angle <- 180 - os.angle;
@@ -269,7 +285,7 @@ let calc_next_state os percent_frame =
       in
       if is_between !ny lower upper || is_between by lower upper
       then begin
-        nx := bx; (* adjust the coordinate not to cross the paddle *)
+        nx := bx; (* tk: adjust the coordinate not to cross the paddle *)
         dx := - !dx;
         ns.ltr <- true;
         ns.angle <- choose_angle (2.0 *. float (ns.p1_pos - !ny) /. (float the.paddle.height));
@@ -286,7 +302,7 @@ let calc_next_state os percent_frame =
       in
       if is_between !ny lower upper || is_between by lower upper
       then begin
-        nx := bx; (* adjust the coordinate not to cross the paddle *)
+        nx := bx; (* tk: adjust the coordinate not to cross the paddle *)
         dx := - !dx;
         ns.ltr <- false;
         ns.angle <- choose_angle (2.0 *. float (ns.p2_pos - !ny) /. (float the.paddle.height));
@@ -311,6 +327,8 @@ let calc_next_state os percent_frame =
 
 
 let do_tick () =
+
+  ilog "tick";
 
   if the.game.state = "play" then (
     let p1_up = state "1U" = "T"
@@ -367,46 +385,11 @@ let render_state state =
   ()
 
 
-let render () =
-  render_state the.game_prev
 
-
-
-let render_lerp =
-
-  let lerp1 perc a b =
-    a + (b - a) * perc / 100
-
-  in
-
-  let lerp2 perc a b =
-    let a1, a2 = a
-    and b1, b2 = b in
-    (lerp1 perc a1 b1), (lerp1 perc a2 b2)
-
-  in
-
-  let render_lerp_1 percent_frame =
-    (** method 1, pure lerp between previous and next position:
-      * much suckage at the angles as they get smoothed out *)
-    (* multiplier: state advance 0...100 *)
-    let lerp_state = {
-      the.game_prev with
-          ball = lerp2 percent_frame the.game_prev.ball the.game.ball;
-          p1_pos = lerp1 percent_frame the.game_prev.p1_pos the.game.p1_pos;
-          p2_pos = lerp1 percent_frame the.game_prev.p2_pos the.game.p2_pos
-    } in
-    render_state lerp_state
-
-  in
-
-  let render_lerp_2 percent_frame =
-    (* method 2: calculate lerped ball using engine, very good *)
-    calc_next_state the.game_prev percent_frame |> render_state
-
-  in
-
-  render_lerp_2
+let render_lerp percent_frame =
+  (* calculate lerped ball using engine, very good *)
+  ilog "render %d" percent_frame;
+  calc_next_state the.game_prev percent_frame |> render_state
 
 
 let rec random_nonnull lo hi =
@@ -440,13 +423,18 @@ let process_keyboard () =
     | Key k -> (
             match k.sym with
             | K_ESCAPE ->
+                Sdl.quit ();
                 exit 0;
+            | K_RETURN ->
+                if (k.keystate = PRESSED && List.exists (fun x -> x = KMOD_LALT) k.modifiers) then toggle_fullscreen ();
             | K_1 ->
                 if k.keystate = PRESSED then set_computer_p1 ();
             | K_2 ->
                 if k.keystate = PRESSED then set_computer_p2 ();
             | K_SPACE ->
                 if k.keystate = PRESSED then restart_game ();
+            | K_D ->
+                if k.keystate = PRESSED then toggle_debug ();
             | K_A ->
                 paddle_state "1U" ( k.keystate = PRESSED );
                 the.game.p1_is_computer <- false;
@@ -461,6 +449,11 @@ let process_keyboard () =
                 the.game.p2_is_computer <- false;
             | _ -> ()
     )
+    | Button b ->
+        restart_game ();
+    | Quit ->
+        Sdl.quit ();
+        exit 0;
     | Resize r ->
         ilog "resize to %dx%d" r.w r.h;
         the.screen.width <- r.w;
@@ -469,13 +462,12 @@ let process_keyboard () =
     | _ -> ()
 
 
-let rec main_loop last_frame =
+let rec main_loop_v1 last_frame =
 
   let period = 1.0 /. (float the.hz) in
 
   let now = Unix.gettimeofday() in
   let tick_diff = now -. last_frame in
-  (* log "tick/diff=%.3f" tick_diff; *)
   let new_frame = tick_diff > period in
   let new_last_frame =
     if new_frame then begin
@@ -484,23 +476,44 @@ let rec main_loop last_frame =
       now
     end else last_frame
   in
-  (*if new_frame then begin
-    render ();
-  end else begin*)
     (int_of_float (100.0 *. tick_diff /. period) mod 100) |> render_lerp;
-    (* Timer.delay 5; *)
-  (*end;*)
-  main_loop new_last_frame
+  main_loop_v1 new_last_frame
+
+
+let rec main_loop_v2 expected_frame =
+
+  let period = 1.0 /. (float the.hz) in
+
+  let now = Unix.gettimeofday() in
+
+  if now > expected_frame then begin
+    process_keyboard ();
+    do_tick ();
+    let tick_diff = now -. expected_frame in
+    Timer.delay 5;
+    (* log "1diff=%.04f, period=%.04f" tick_diff period; *)
+    (int_of_float (100.0 *. tick_diff /. period) mod 100) |> render_lerp;
+    let next_frame =
+      if expected_frame +. period < now
+      then now
+      else expected_frame +. period in
+    main_loop_v2 next_frame;
+  end else begin
+    let tick_diff = (period -. (expected_frame -. now)) in
+    Timer.delay 5;
+    (* log "2diff=%.04f, period=%.04f" tick_diff period; *)
+    (int_of_float (100.0 *. tick_diff /. period) mod 100) |> render_lerp;
+    main_loop_v2 expected_frame
+  end
 
 
 let main () =
   Sdl.init [Sdl.VIDEO];
   Random.self_init ();
-  ignore( set_video_mode the.screen.width the.screen.height 32 [OPENGL] );
   set_caption "Skapong, the boring pong" "skapong";
-  init_gl ();
-  swap_buffers ();
-  main_loop 0.0
+  init_video ();
+  restart_game ();
+  Unix.gettimeofday () |> main_loop_v2
 
 
 let _ = main ()
