@@ -38,17 +38,17 @@ type gamestate =
   { mutable ball:    dimension * dimension (* current position *)
 
   ; mutable ltr:     bool (* true if ball moving from left to right *)
-  ; mutable angle:   int (* angle, 0..180 *)
-  ; mutable speed:   int (* speed, mm/s *)
+  ; mutable angle:   int  (* angle, 0..180 *)
+  ; mutable speed:   int  (* speed, mm/s *)
 
 
   ; mutable p1_pos:  dimension (* vertical center of the first paddle *)
   ; mutable p2_pos:  dimension (* vertical center of the second paddle *)
 
-  ; mutable state:   string
+  ; mutable state:   string (* play / stop *)
 
-  ; mutable p1_move: string
-  ; mutable p2_move: string
+  ; mutable p1_move: string (* none/up/down *)
+  ; mutable p2_move: string (* none/up/down *)
 
   ; mutable p1_is_computer: bool
   ; mutable p2_is_computer: bool
@@ -77,7 +77,6 @@ type the =
   { screen:        dimensions
   ; field:         dimensions
   ; paddle:        dimensions
-  ; mutable timer: float
   ; start_time:    float
   ; states:        (string, string) Hashtbl.t
   ; mutable game:  gamestate
@@ -102,7 +101,6 @@ let the =
   ; game       = gamestate_clean
   ; game_prev  = gamestate_clean
   ; start_time = Unix.gettimeofday ()
-  ; timer      = 0.0
   ; states     = Hashtbl.create 4
   ; hz         = 20
   }
@@ -112,7 +110,7 @@ let restart_game () =
   if the.game.state = "stop" then (
     the.game.ball  <- half the.field.width, half the.field.height;
     the.game.ltr   <- Random.bool ();
-    the.game.angle <- Random.int 180;
+    the.game.angle <- 40 + Random.int 100;
     the.game.speed <- dimension_m 40;
     the.game.state <- "play";
   )
@@ -133,22 +131,31 @@ let init_gl () =
 
 
 
-let draw_rectangle x1 y1 x2 y2 =
-  glBegin gl_line_loop;
-  glVertex2f x1 y1;
-  glVertex2f x2 y1;
-  glVertex2f x2 y2;
-  glVertex2f x1 y2;
+let draw_paddle x y is_computer =
+  let xx = float x
+  and yy = float y
+  and hh = half the.paddle.height |> float
+  and ww = half the.paddle.width |> float
+  in
+  glColor3f 1.0 (if is_computer then 0.0 else 1.0) 0.0;
+  glBegin gl_quads;
+  glVertex2f (xx -. ww) (yy -. hh);
+  glVertex2f (xx +. ww) (yy -. hh);
+  glVertex2f (xx +. ww) (yy +. hh);
+  glVertex2f (xx -. ww) (yy +. hh);
   glEnd ()
 
 
 let draw_ball x y =
-  let ball_size = 400. in
-  glBegin gl_line_loop;
-  glVertex2f (x -. ball_size) (y -. ball_size);
-  glVertex2f (x +. ball_size) (y -. ball_size);
-  glVertex2f (x +. ball_size) (y +. ball_size);
-  glVertex2f (x -. ball_size) (y +. ball_size);
+  let fx = float x
+  and fy = float y
+  and ball_size = 400.0 in
+  glColor3f 1.0 1.0 0.7;
+  glBegin gl_quads;
+  glVertex2f (fx -. ball_size) (fy -. ball_size);
+  glVertex2f (fx +. ball_size) (fy -. ball_size);
+  glVertex2f (fx +. ball_size) (fy +. ball_size);
+  glVertex2f (fx -. ball_size) (fy +. ball_size);
   glEnd ()
 
 
@@ -181,7 +188,7 @@ let choose_angle percentage =
 
 let calc_next_state os percent_frame =
 
-  if os.state <> "play"
+  if os.state <> "play" || percent_frame = 0
   then os
   else begin
     let ns = { os with state = os.state } (* new state *)
@@ -198,15 +205,16 @@ let calc_next_state os percent_frame =
 
     if os.angle >= 90
     then begin
-      dx := +int_of_float ((float speed) *. ((180 - os.angle) |> rad_of_angle |> sin));
+      dx := int_of_float ((float speed) *. ((180 - os.angle) |> rad_of_angle |> sin));
       dy := -int_of_float ((float speed) *. ((180 - os.angle) |> rad_of_angle |> cos));
     end else begin
       dx := int_of_float (float speed *. (os.angle |> rad_of_angle |> sin));
       dy := int_of_float (float speed *. (os.angle |> rad_of_angle |> cos));
     end;
 
-
     if not os.ltr then dx := - !dx;
+
+    let pc x = if x then "compt" else "human" in
 
     if ns.p1_is_computer then (
       let hit_y =
@@ -214,7 +222,7 @@ let calc_next_state os percent_frame =
 
       let move_up = os.p1_pos + half the.paddle.height < hit_y
       and move_dn = os.p1_pos - half the.paddle.height > hit_y in
-      os.p2_move <- "none";
+      os.p1_move <- "none";
       if move_up then os.p1_move <- "up";
       if move_dn then os.p1_move <- "down";
     );
@@ -229,7 +237,6 @@ let calc_next_state os percent_frame =
       if move_up then os.p2_move <- "up";
       if move_dn then os.p2_move <- "down";
     );
-
 
     if os.p1_move = "up"        then ns.p1_pos <- os.p1_pos + inc
     else if os.p1_move = "down" then ns.p1_pos <- os.p1_pos - inc;
@@ -339,33 +346,22 @@ let do_tick () =
 
 
 
-let float4 fn a b c d =
-  fn (float a) (float b) (float c) (float d)
-
 
 let render_state state =
-  glClearColor 0.1 0.1 0.1 1.0;
+  glClearColor 0.1 0.1 0.1 0.0;
   glClear gl_color_buffer_bit;
 
   glLoadIdentity ();
 
-  glTranslatef 0.375 0.375 0.0;
-
-  let hh = the.paddle.height / 2
-  and padding = 100
+  let padding = 100 + the.paddle.width / 2
   in
 
-  float4 draw_rectangle
-    (padding)                    (state.p1_pos - hh)
-    (padding + the.paddle.width) (state.p1_pos + hh);
-
-  float4 draw_rectangle
-    (the.field.width - padding - the.paddle.width) (state.p2_pos - hh)
-    (the.field.width - padding)                    (state.p2_pos + hh);
+  draw_paddle padding state.p1_pos state.p1_is_computer;
+  draw_paddle (the.field.width - padding) state.p2_pos state.p2_is_computer;
 
   let bx, by = state.ball
   in
-  draw_ball (float bx) (float by);
+  draw_ball bx by;
 
   swap_buffers ();
 
@@ -406,7 +402,7 @@ let render_lerp =
   in
 
   let render_lerp_2 percent_frame =
-    (* method 2: calculate lerped ball using engine *)
+    (* method 2: calculate lerped ball using engine, very good *)
     calc_next_state the.game_prev percent_frame |> render_state
 
   in
