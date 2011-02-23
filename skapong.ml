@@ -86,8 +86,8 @@ type the =
 
 
 let the =
-  { screen = { width  = 1024
-             ; height = 768
+  { screen = { width  = 800
+             ; height = 600
              }
 
   ; field = { width  = dimension_m 100
@@ -214,8 +214,7 @@ let calc_next_state os percent_frame =
 
     if not os.ltr then dx := - !dx;
 
-    let pc x = if x then "compt" else "human" in
-
+    (* a simple AI logic *)
     if ns.p1_is_computer then (
       let hit_y =
         by + (if os.ltr then !dy else - !dy) * bx / !dx in
@@ -471,22 +470,26 @@ let process_keyboard () =
 
 
 let rec main_loop last_frame =
-  let tick_diff = Unix.gettimeofday () -. last_frame in
-  let new_frame = tick_diff > (1.0 /. (float the.hz)) in
+
+  let period = 1.0 /. (float the.hz) in
+
+  let now = Unix.gettimeofday() in
+  let tick_diff = now -. last_frame in
+  (* log "tick/diff=%.3f" tick_diff; *)
+  let new_frame = tick_diff > period in
   let new_last_frame =
     if new_frame then begin
-      let ret = Unix.gettimeofday () in
       process_keyboard ();
       do_tick ();
-      ret
+      now
     end else last_frame
   in
-  if new_frame then begin
+  (*if new_frame then begin
     render ();
-  end else begin
-    int_of_float (100.0 *. tick_diff /. (1.0 /. (float the.hz))) |> render_lerp;
-    Timer.delay 5;
-  end;
+  end else begin*)
+    (int_of_float (100.0 *. tick_diff /. period) mod 100) |> render_lerp;
+    (* Timer.delay 5; *)
+  (*end;*)
   main_loop new_last_frame
 
 
