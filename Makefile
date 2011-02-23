@@ -1,8 +1,21 @@
-SOURCES = skapong.ml
+FILES = skapong.ml
 RESULT  = skapong
 
-LIBS = graphics
+LIBDIR = lib
+LIBS = graphics unix bigarray
 
-include OCamlMakefile
+WIN_SOURCE=$(LIBDIR)/win_stub.c $(LIBDIR)/win.mli $(LIBDIR)/win.ml
+SDL_SOURCE=$(LIBDIR)/sdl_stub.c $(LIBDIR)/sdl.mli $(LIBDIR)/sdl.ml
+GL_SOURCE=$(LIBDIR)/glcaml_stub.c $(LIBDIR)/glcaml.mli $(LIBDIR)/glcaml.ml
 
+CLIBS = SDL GL
+
+#CLIBS = SDL opengl32 gdi32
+#WIN32 = true
+
+SOURCES = ${WIN_SOURCE} ${SDL_SOURCE} ${GL_SOURCE} ${FILES}
+
+
+#all: byte-code
+include XCamlMakefile
 
