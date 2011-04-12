@@ -25,6 +25,8 @@ let rad_of_angle a = float a *. tau /. 360.0
 let half x = x / 2
 let middle_of a b = ( a + b ) / 2
 
+let initial_speed = dimension_m 80;
+
 
 type dimensions =
   { mutable width:  dimension
@@ -80,7 +82,7 @@ type the =
   ; states:        (string, string) Hashtbl.t
   ; mutable game:  gamestate
   ; mutable game_prev: gamestate
-  ; hz:            int (* game updates/s *)
+  ; mutable hz:    int (* game updates/s *)
   }
 
 
@@ -115,7 +117,7 @@ let restart_game () =
     the.game.ball  <- half the.field.width, half the.field.height;
     the.game.ltr   <- Random.bool ();
     the.game.angle <- 40 + Random.int 100;
-    the.game.speed <- dimension_m 40;
+    the.game.speed <- initial_speed;
     the.game.state <- "play";
   )
 
@@ -125,51 +127,91 @@ let gl_resize () =
   glMatrixMode gl_modelview
 
 
-let init_gl () =
-  glMatrixMode gl_projection;
-  glLoadIdentity ();
-  glDisable gl_depth_test;
-  gl_resize ()
+let texture = Array.make 1 0
 
-let init_video () =
-  let flags = (if the.fullscreen then [OPENGL; FULLSCREEN] else [OPENGL]) in
-  ignore( set_video_mode the.screen.width the.screen.height 32 flags );
-  init_gl ()
+let initialize_video () = (* {{{ *)
+
+
+  let load_textures () =
+    let s = load_bmp "balls/background.bmp" in
+    glGenTextures 1 texture;
+    glBindTexture gl_texture_2d texture.(0);
+
+    glTexParameteri gl_texture_2d gl_texture_mag_filter gl_linear;
+    glTexParameteri gl_texture_2d gl_texture_min_filter gl_linear;
+
+    (*glTexParameteri gl_texture_2d gl_texture_wrap_s gl_repeat;
+    glTexParameteri gl_texture_2d gl_texture_wrap_t gl_repeat;*)
+
+    (* 2d texture, level of detail 0 (normal), 3 components (red, green, blue), x size from image, y size from image,
+      border 0 (normal), rgb color data, unsigned byte data, and finally the data itself. *)
+    log "Loaded %d x %d" (surface_width s) (surface_height s);
+    glTexImage2D gl_texture_2d 0 3 (surface_width s) (surface_height s) 0 gl_rgb gl_unsigned_byte (surface_pixels s)
+
+
+  and init_opengl () =
+
+    glEnable gl_blend;
+    glDisable gl_cull_face;
+    glDisable gl_depth_test;
+
+    glMatrixMode gl_projection;
+    glLoadIdentity ();
+    glAlphaFunc gl_greater 0.0;
+    glEnable gl_alpha_test;
+
+    gl_resize ();
+
+
+  and init_video_mode () =
+    let flags = (if the.fullscreen then [OPENGL; FULLSCREEN; HWPALETTE] else [OPENGL; HWPALETTE]) in
+    set_attribute DOUBLEBUFFER 1;
+    set_attribute MULTISAMPLEBUFFERS 1;
+    set_attribute MULTISAMPLESAMPLES 2;
+
+    ignore( set_video_mode the.screen.width the.screen.height 0 flags );
+    (* Video.show_cursor the.fullscreen; *)
+
+  in
+
+  init_video_mode ();
+  init_opengl ();
+  load_textures ();
+  () (* }}} *)
 
 let toggle_fullscreen () =
   the.fullscreen <- not the.fullscreen;
-  init_video ()
+  initialize_video ()
 
 let toggle_debug () =
   the.debug <- not the.debug;
   log "debug %s" (if the.debug then "on" else "off")
 
 let draw_paddle x y is_computer =
-  let xx = float x
-  and yy = float y
-  and hh = half the.paddle.height |> float
-  and ww = half the.paddle.width |> float
+  let hh = half the.paddle.height
+  and ww = half the.paddle.width
   in
   glColor3f 1.0 (if is_computer then 0.0 else 1.0) 0.0;
   glBegin gl_quads;
-  glVertex2f (xx -. ww) (yy -. hh);
-  glVertex2f (xx +. ww) (yy -. hh);
-  glVertex2f (xx +. ww) (yy +. hh);
-  glVertex2f (xx -. ww) (yy +. hh);
+  glVertex2i (x - ww) (y - hh);
+  glVertex2i (x + ww) (y - hh);
+  glVertex2i (x + ww) (y + hh);
+  glVertex2i (x - ww) (y + hh);
   glEnd ()
 
 
 let draw_ball x y =
   let fx = float x
   and fy = float y
-  and ball_size = 400.0 in
-  glColor3f 1.0 1.0 0.7;
+  and ball_size = 1000.0 in
+  glColor3f 0.7 0.7 0.7;
   glBegin gl_quads;
   glVertex2f (fx -. ball_size) (fy -. ball_size);
   glVertex2f (fx +. ball_size) (fy -. ball_size);
   glVertex2f (fx +. ball_size) (fy +. ball_size);
   glVertex2f (fx -. ball_size) (fy +. ball_size);
   glEnd ()
+
 
 
 let clamp v lo hi =
@@ -365,7 +407,10 @@ let do_tick () =
 
 
 let render_state state =
+  let identity x = x in
+
   glClearColor 0.1 0.1 0.1 0.0;
+
   glClear gl_color_buffer_bit;
 
   glLoadIdentity ();
@@ -373,14 +418,45 @@ let render_state state =
   let padding = 100 + the.paddle.width / 2
   in
 
+  (* draw background *)
+  glEnable gl_texture_2d;
+
+  glColor3f 1.0 1.0 1.0;
+
+  glBegin gl_quads;
+
+  (* try to do per-pixel mapping *)
+  let adjx = (float the.screen.width) /. 256.0
+  and adjy = (float the.screen.height) /. 256.0 in
+
+  glTexCoord2f 0.0 0.0;
+  glVertex2i 0 0;
+
+  glTexCoord2f adjx 0.0;
+  glVertex2i the.field.width 0;
+
+  glTexCoord2f adjx adjy;
+  glVertex2i the.field.width (identity the.field.height);
+
+  glTexCoord2f 0.0 adjy;
+  glVertex2i 0 (identity the.field.height);
+
+  glEnd ();
+  glDisable gl_texture_2d;
+
+  glEnable gl_texture_2d;
+
   draw_paddle padding state.p1_pos state.p1_is_computer;
   draw_paddle (the.field.width - padding) state.p2_pos state.p2_is_computer;
 
   let bx, by = state.ball
   in
   draw_ball bx by;
+  glDisable gl_texture_2d;
 
   swap_buffers ();
+
+  glFinish ();
 
   ()
 
@@ -417,8 +493,10 @@ let set_computer_p2 () =
   the.game.state <- "play"
 
 
+exception No_more_events
 
-let process_keyboard () =
+let rec process_events () =
+  (
     match poll_event () with
     | Key k -> (
             match k.sym with
@@ -459,7 +537,10 @@ let process_keyboard () =
         the.screen.width <- r.w;
         the.screen.height <- r.h;
         gl_resize ();
+    | NoEvent -> raise No_more_events
     | _ -> ()
+  );
+  process_events ()
 
 
 let rec main_loop_v1 last_frame =
@@ -471,7 +552,9 @@ let rec main_loop_v1 last_frame =
   let new_frame = tick_diff > period in
   let new_last_frame =
     if new_frame then begin
-      process_keyboard ();
+      try
+        process_events ();
+      with No_more_events -> ();
       do_tick ();
       now
     end else last_frame
@@ -487,10 +570,11 @@ let rec main_loop_v2 expected_frame =
   let now = Unix.gettimeofday() in
 
   if now > expected_frame then begin
-    process_keyboard ();
+    try
+      process_events ();
+    with No_more_events -> ();
     do_tick ();
     let tick_diff = now -. expected_frame in
-    Timer.delay 5;
     (* log "1diff=%.04f, period=%.04f" tick_diff period; *)
     (int_of_float (100.0 *. tick_diff /. period) mod 100) |> render_lerp;
     let next_frame =
@@ -500,23 +584,41 @@ let rec main_loop_v2 expected_frame =
     main_loop_v2 next_frame;
   end else begin
     let tick_diff = (period -. (expected_frame -. now)) in
-    Timer.delay 5;
     (* log "2diff=%.04f, period=%.04f" tick_diff period; *)
     (int_of_float (100.0 *. tick_diff /. period) mod 100) |> render_lerp;
     main_loop_v2 expected_frame
   end
 
 
+let rec main_loop_fuckall () =
+
+  the.hz <- 80;
+
+  let now = Timer.get_ticks() in
+  render_lerp 0;
+  try process_events () with No_more_events -> ();
+  do_tick ();
+
+  let delay = (1000 / the.hz) - (Timer.get_ticks() - now) in
+  if delay > 0 then Timer.delay delay;
+
+  main_loop_fuckall ()
+
+
+let main_loop () =
+  (* Unix.gettimeofday () |> main_loop_v2 *)
+  main_loop_fuckall ()
+
 let main () =
   Sdl.init [Sdl.VIDEO];
   Random.self_init ();
   set_caption "Skapong, the boring pong" "skapong";
-  init_video ();
+  initialize_video ();
   restart_game ();
-  Unix.gettimeofday () |> main_loop_v2
+  main_loop ()
 
 
 let _ = main ()
 
-(* vim: set tw=0 : *)
+(* vim: set tw=0 fdm=marker : *)
 

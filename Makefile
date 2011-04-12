@@ -10,12 +10,9 @@ GL_SOURCE=$(LIBDIR)/glcaml_stub.c $(LIBDIR)/glcaml.mli $(LIBDIR)/glcaml.ml
 
 CLIBS = SDL GL
 
-#CLIBS = SDL opengl32 gdi32
-#WIN32 = true
-
 SOURCES = ${WIN_SOURCE} ${SDL_SOURCE} ${GL_SOURCE} ${FILES}
 
 
-#all: byte-code
-include XCamlMakefile
+all: native-code
+include OCamlMakefile
 
