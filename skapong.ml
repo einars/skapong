@@ -9,6 +9,7 @@ open SDLGL
 open Glcaml
 
 let (|>) a b = b a
+let ($) a b = b a
 
 (* all size measurements are in millimeters *)
 (* meters/centimeters -> millimeters *)
@@ -20,13 +21,14 @@ let dimension_cm cm = cm * 10
 
 let tau = 6.2831852
 
-let rad_of_angle a = float a *. tau /. 360.0
+let radians_of angle = float angle *. tau /. 360.0
 
 let half x = x / 2
 let middle_of a b = ( a + b ) / 2
 
-let initial_speed = dimension_m 80;
+type point = int * int
 
+type intersection = None | Point of point
 
 type dimensions =
   { mutable width:  dimension
@@ -35,11 +37,7 @@ type dimensions =
 
 type gamestate =
   { mutable ball:    dimension * dimension (* current position *)
-
-  ; mutable ltr:     bool (* true if ball moving from left to right *)
-  ; mutable angle:   int  (* angle, 0..180 *)
-  ; mutable speed:   int  (* speed, mm/s *)
-
+  ; mutable vector:  int * int
 
   ; mutable p1_pos:  dimension (* vertical center of the first paddle *)
   ; mutable p2_pos:  dimension (* vertical center of the second paddle *)
@@ -57,9 +55,7 @@ type gamestate =
 
 let gamestate_clean =
   { ball    = 0, 0
-  ; ltr     = false
-  ; angle   = 0 (* 0..180 *)
-  ; speed   = 0 (* mm/s *)
+  ; vector  = 1, 1
 
   ; p1_pos  = 0
   ; p2_pos  = 0
@@ -91,12 +87,12 @@ let the =
              ; height = 600
              }
 
-  ; field = { width  = dimension_m 100
-            ; height = dimension_m 75
+  ; field = { width  = dimension_m 10
+            ; height = dimension_m 7
             }
 
-  ; paddle = { width  = dimension_cm 100
-             ; height = dimension_cm 900
+  ; paddle = { width  = dimension_cm 10
+             ; height = dimension_cm 90
              }
 
   ; game       = gamestate_clean
@@ -111,13 +107,58 @@ let the =
 let log m  = kprintf (fun m -> try printf "%s\n%!" m with _ -> () ) m
 let ilog m = kprintf (fun m -> if the.debug then log "%s" m) m (* ignore log *)
 
+let x_make_vector angle length =
+  (float length) *. cos ( radians_of angle ) $ int_of_float,
+  (float length) *. sin ( radians_of angle ) $ int_of_float
+
+let make_vector a l =
+  let x1, x2 = x_make_vector a l in
+  log "Vector (a = %d, l = %d) -> (%d, %d)" a l x1 x2;
+  x1, x2
+
+
+let (|+) pt vec =
+  let x, y = pt
+  and dx, dy = vec in
+  x + dx, y + dy
+
+let (|-) pt vec =
+  let x, y = pt
+  and dx, dy = vec in
+  x - dx, y - dy
+
+let (|%) vec percentage =
+  let x, y = vec in
+  x * percentage / 100, y * percentage / 100
+
+let reflect_x vec =
+  let x, y = vec in -x, y
+
+let reflect_y vec =
+  let x, y = vec in x, -y
+
+let length_of vec =
+  let x, y = vec in
+  int_of_float ( sqrt (x * x + y * y $ float) )
+
+let angle_of vec =
+  let x, y = vec in
+  if x == 0 then
+    if y = 0 then 0 else if y >= 0 then 90 else 270
+  else
+    if y = 0 then 180 else
+    ((float y) /. (float x) $ atan) *. 360.0 /. tau $ int_of_float
+
+let string_of_pt p =
+  let x, y = p in sprintf "(%d,%d)" x y
+
+let string_of_vec v =
+  let x, y = v in sprintf "[%d,%d]" x y
 
 let restart_game () =
   if the.game.state = "stop" then (
     the.game.ball  <- half the.field.width, half the.field.height;
-    the.game.ltr   <- Random.bool ();
-    the.game.angle <- 40 + Random.int 100;
-    the.game.speed <- initial_speed;
+    the.game.vector <- make_vector (Random.int 360) 100;
     the.game.state <- "play";
   )
 
@@ -203,7 +244,7 @@ let draw_paddle x y is_computer =
 let draw_ball x y =
   let fx = float x
   and fy = float y
-  and ball_size = 1000.0 in
+  and ball_size = 100.0 in
   glColor3f 0.7 0.7 0.7;
   glBegin gl_quads;
   glVertex2f (fx -. ball_size) (fy -. ball_size);
@@ -241,56 +282,93 @@ let choose_angle percentage =
   clamp (adj_base +. 0.5 *. (180.0 -. adj_base) *. (percentage +. 1.0) |> int_of_float) (int_of_float adj_base) (int_of_float (180.0 -. adj_base))
 
 
+let vector_of seg =
+  let (x1, y1),(x2, y2) = seg in
+  (x2 - x1), (y2 - y1)
+
+let intersection_of seg1 seg2 =
+  let (x1, y1),(x2, y2) = seg1
+  and (x3, y3),(x4, y4) = seg2 in
+
+  let den = (y4 - y3) * (x2 - x1) - (x4 - x3) * (y2 - y1) in
+  if den == 0 then None
+  else
+    let ua = float ((x4 - x3) * (y1 - y3) - (y4 - y3) * (x1 - x3) ) /. float den
+    and ub = float ((x2 - x1) * (y1 - y3) - (y2 - y1) * (x1 - x3) ) /. float den in
+    if ua > 0.0 && ua < 1.0 && ub > 0.0 && ub < 1.1 then
+      Point ( x1 + int_of_float ( ua *. (x2 - x1 $ float) )
+            , y1 + int_of_float ( ua *. (y2 - y1 $ float) ) )
+    else None
+
+let is_horizontal seg =
+  let (x1, _), (x2, _) = seg in x1 = x2
+
+
+let reflecting_thrust pt orig_direction surfaces =
+
+  let rec rethrust pt direction s =
+    let trajectory = pt, pt |+ direction in
+    match s with
+      | wall :: rest -> (
+        match intersection_of trajectory wall with
+        | None -> rethrust pt direction rest (* try next wall *)
+        | Point i -> if is_horizontal wall then rethrust i (pt |+ direction |- i |> reflect_x) surfaces
+                                           else rethrust i (pt |+ direction |- i |> reflect_y) surfaces
+        )
+      | _ -> pt |+ direction, direction (* finished *)
+  in
+
+  rethrust pt orig_direction surfaces
+  (* let pt, last_direction = rethrust pt orig_direction surfaces in *)
+  (* let new_direction = make_vector (angle_of last_direction) (length_of orig_direction) in *)
+  (* pt, new_direction *)
+
+
+let test_thrust () =
+  let seg = (3, 3), (10, 3)
+  in
+  let np, nd = reflecting_thrust (3,0) (5,5) [seg] in
+  log "%s %s" (string_of_pt np) (string_of_vec nd);
+
+  ()
+
+
+
+let nonnull x = if x == 0 then 1 else x
+
 let calc_next_state os percent_frame =
 
   if os.state <> "play" || percent_frame = 0
   then os
   else begin
     let ns = { os with state = os.state } (* new state *)
-    and bx, by = os.ball
-    and inc = ((dimension_m 60) / the.hz) * percent_frame / 100
+    and inc = ((dimension_m 6) / the.hz) * percent_frame / 100
 
-    and dx = ref 0 and dy = ref 0
+    and direction = os.vector |% percent_frame in
 
-    and speed = (os.speed / the.hz) * percent_frame / 100
+    (* (* a simple AI logic *) *)
+    (* if ns.p1_is_computer then ( *)
+    (*   let hit_y = *)
+    (*     by + dy * bx / dx in *)
 
-    in
-
-    (* calculate the ball advancement *)
-
-    if os.angle >= 90
-    then begin
-      dx := int_of_float ((float speed) *. ((180 - os.angle) |> rad_of_angle |> sin));
-      dy := -int_of_float ((float speed) *. ((180 - os.angle) |> rad_of_angle |> cos));
-    end else begin
-      dx := int_of_float (float speed *. (os.angle |> rad_of_angle |> sin));
-      dy := int_of_float (float speed *. (os.angle |> rad_of_angle |> cos));
-    end;
-
-    if not os.ltr then dx := - !dx;
-
-    (* a simple AI logic *)
-    if ns.p1_is_computer then (
-      let hit_y =
-        by + (if os.ltr then !dy else - !dy) * bx / !dx in
-
-      let move_up = os.p1_pos + half the.paddle.height < hit_y
-      and move_dn = os.p1_pos - half the.paddle.height > hit_y in
-      os.p1_move <- "none";
-      if move_up && hit_y < 2 * the.field.height then os.p1_move <- "up";
-      if move_dn && hit_y > - 2 * the.field.height then os.p1_move <- "down";
-    );
+    (*   let move_up = os.p1_pos + half the.paddle.height < hit_y *)
+    (*   and move_dn = os.p1_pos - half the.paddle.height > hit_y in *)
+    (*   os.p1_move <- "none"; *)
+    (*   if move_up && hit_y < 2 * the.field.height then os.p1_move <- "up"; *)
+    (*   if move_dn && hit_y > - 2 * the.field.height then os.p1_move <- "down"; *)
+    (* ); *)
 
 
-    if ns.p2_is_computer then (
-      let hit_y =
-        by + (if os.ltr then !dy else - !dy) * (the.field.width - bx) / !dx in
-      let move_up = os.p2_pos + half the.paddle.height < hit_y
-      and move_dn = os.p2_pos - half the.paddle.height > hit_y in
-      os.p2_move <- "none";
-      if move_up && hit_y < 2 * the.field.height then os.p2_move <- "up";
-      if move_dn && hit_y > - 2 * the.field.height then os.p2_move <- "down";
-    );
+    (* if ns.p2_is_computer then ( *)
+    (*   let hit_y = *)
+    (*     by + dy * (the.field.width - bx) / dx in *)
+
+    (*   let move_up = os.p2_pos + half the.paddle.height < hit_y *)
+    (*   and move_dn = os.p2_pos - half the.paddle.height > hit_y in *)
+    (*   os.p2_move <- "none"; *)
+    (*   if move_up && hit_y < 2 * the.field.height then os.p2_move <- "up"; *)
+    (*   if move_dn && hit_y > - 2 * the.field.height then os.p2_move <- "down"; *)
+    (* ); *)
 
 
 
@@ -306,61 +384,39 @@ let calc_next_state os percent_frame =
     ns.p1_pos <- clamp ns.p1_pos paddle_clip_lo paddle_clip_hi;
     ns.p2_pos <- clamp ns.p2_pos paddle_clip_lo paddle_clip_hi;
 
-    let nx = ref (bx + !dx) and ny = ref (by + !dy) in
 
-    (* check reflections *)
+    let reflective_surfaces = [
+      (0, 0), (the.field.width, 0);
+      (0, the.field.height), (the.field.width, the.field.height);
+      (the.paddle.width, os.p1_pos - half the.paddle.height), (the.paddle.width, os.p1_pos + half the.paddle.height);
+      (the.field.width - the.paddle.width, os.p2_pos - half the.paddle.height), (the.field.width - the.paddle.width, os.p2_pos + half the.paddle.height);
+    ] in
 
-    if !ny <= 0 || !ny >= the.field.height then (
-      (* tk properly calculate the return position *)
-      ny := by;
-      dy := - !dy;
-      ns.angle <- 180 - os.angle;
-    );
+    let new_ball, new_direction = reflecting_thrust os.ball direction reflective_surfaces in
 
-    (* reflect left paddle? *)
+    ns.vector <- new_direction;
 
-    if (not os.ltr) && bx >= the.paddle.width && !nx < the.paddle.width
-    then begin
-      (* paddle vertically (y) takes pos - paddle.height / 2 ... pos + paddle.height / 2 *)
-      let lower = os.p1_pos - half the.paddle.height
-      and upper = os.p1_pos + half the.paddle.height
-      in
-      if is_between !ny lower upper || is_between by lower upper
-      then begin
-        nx := bx; (* tk: adjust the coordinate not to cross the paddle *)
-        dx := - !dx;
-        ns.ltr <- true;
-        ns.angle <- choose_angle (2.0 *. float (ns.p1_pos - !ny) /. (float the.paddle.height));
-        ns.speed <- ns.speed + (dimension_m 5);
-      end;
-    end;
+      (*
+      ns.ltr <- true;
+      ns.angle <- choose_angle (2.0 *. float (ns.p1_pos - !ny) /. (float the.paddle.height));
+      ns.speed <- ns.speed + (dimension_m 5);
+      *)
 
-    (* reflect right paddle? *)
-
-    if os.ltr && bx <= the.field.width - the.paddle.width && !nx > the.field.width - the.paddle.width
-    then begin
-      let lower = os.p2_pos - half the.paddle.height
-      and upper = os.p2_pos + half the.paddle.height
-      in
-      if is_between !ny lower upper || is_between by lower upper
-      then begin
-        nx := bx; (* tk: adjust the coordinate not to cross the paddle *)
-        dx := - !dx;
+      (*
         ns.ltr <- false;
         ns.angle <- choose_angle (2.0 *. float (ns.p2_pos - !ny) /. (float the.paddle.height));
         ns.speed <- ns.speed + (dimension_m 5);
-      end;
-    end;
+        *)
 
-    if !nx > the.field.width || !nx <= 0
+    let nx, _ = new_ball in
+    if nx > the.field.width || nx <= 0
     then begin
       (* ball out of bounds, break game *)
-      nx := half the.field.width;
-      ny := half the.field.height;
+      ns.ball <- half the.field.width, half the.field.height;
       ns.state <- "stop";
-    end;
-
-    ns.ball <- !nx, !ny;
+      log "STOP";
+    end else
+      ns.ball <- new_ball;
 
     ns
 
@@ -592,6 +648,7 @@ let rec main_loop_v2 expected_frame =
 
 let rec main_loop_fuckall () =
 
+
   the.hz <- 80;
 
   let now = Timer.get_ticks() in
@@ -606,10 +663,11 @@ let rec main_loop_fuckall () =
 
 
 let main_loop () =
-  (* Unix.gettimeofday () |> main_loop_v2 *)
-  main_loop_fuckall ()
+  Unix.gettimeofday () |> main_loop_v2
+  (* main_loop_fuckall () *)
 
 let main () =
+  (* test_thrust (); exit 9; *)
   Sdl.init [Sdl.VIDEO];
   Random.self_init ();
   set_caption "Skapong, the boring pong" "skapong";
