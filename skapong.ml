@@ -116,6 +116,11 @@ let make_vector a l =
   log "Vector (a = %d, l = %d) -> (%d, %d)" a l x1 x2;
   x1, x2
 
+let x_of pt =
+  let x, _ = pt in x
+
+let y_of pt =
+  let _, y = pt in y
 
 let (|+) pt vec =
   let x, y = pt
@@ -155,10 +160,11 @@ let string_of_pt p =
 let string_of_vec v =
   let x, y = v in sprintf "[%d,%d]" x y
 
+
 let restart_game () =
   if the.game.state = "stop" then (
     the.game.ball  <- half the.field.width, half the.field.height;
-    the.game.vector <- make_vector (Random.int 360) 100;
+    the.game.vector <- make_vector (Random.int 360) 300;
     the.game.state <- "play";
   )
 
@@ -244,8 +250,8 @@ let draw_paddle x y is_computer =
 let draw_ball x y =
   let fx = float x
   and fy = float y
-  and ball_size = 100.0 in
-  glColor3f 0.7 0.7 0.7;
+  and ball_size = 50.0 in
+  glColor3f 0.9 0.9 0.7;
   glBegin gl_quads;
   glVertex2f (fx -. ball_size) (fy -. ball_size);
   glVertex2f (fx +. ball_size) (fy -. ball_size);
@@ -312,8 +318,12 @@ let reflecting_thrust pt orig_direction surfaces =
       | wall :: rest -> (
         match intersection_of trajectory wall with
         | None -> rethrust pt direction rest (* try next wall *)
+        | Point i -> if is_horizontal wall then i |+ (reflect_x direction), (reflect_x direction)
+                                           else i |+ (reflect_y direction), (reflect_y direction)
+        (*
         | Point i -> if is_horizontal wall then rethrust i (pt |+ direction |- i |> reflect_x) surfaces
                                            else rethrust i (pt |+ direction |- i |> reflect_y) surfaces
+                                           *)
         )
       | _ -> pt |+ direction, direction (* finished *)
   in
@@ -346,29 +356,31 @@ let calc_next_state os percent_frame =
 
     and direction = os.vector |% percent_frame in
 
-    (* (* a simple AI logic *) *)
-    (* if ns.p1_is_computer then ( *)
-    (*   let hit_y = *)
-    (*     by + dy * bx / dx in *)
+    let bx, by = os.ball and dx, dy = direction in
 
-    (*   let move_up = os.p1_pos + half the.paddle.height < hit_y *)
-    (*   and move_dn = os.p1_pos - half the.paddle.height > hit_y in *)
-    (*   os.p1_move <- "none"; *)
-    (*   if move_up && hit_y < 2 * the.field.height then os.p1_move <- "up"; *)
-    (*   if move_dn && hit_y > - 2 * the.field.height then os.p1_move <- "down"; *)
-    (* ); *)
+    (* a simple AI logic *)
+    if ns.p1_is_computer then (
+      let hit_y =
+        by + dy * bx / dx in
+
+      let move_up = os.p1_pos + half the.paddle.height < hit_y
+      and move_dn = os.p1_pos - half the.paddle.height > hit_y in
+      os.p1_move <- "none";
+      if move_up && hit_y < 2 * the.field.height then os.p1_move <- "up";
+      if move_dn && hit_y > - 2 * the.field.height then os.p1_move <- "down";
+    );
 
 
-    (* if ns.p2_is_computer then ( *)
-    (*   let hit_y = *)
-    (*     by + dy * (the.field.width - bx) / dx in *)
+    if ns.p2_is_computer then (
+      let hit_y =
+        by + dy * (the.field.width - bx) / dx in
 
-    (*   let move_up = os.p2_pos + half the.paddle.height < hit_y *)
-    (*   and move_dn = os.p2_pos - half the.paddle.height > hit_y in *)
-    (*   os.p2_move <- "none"; *)
-    (*   if move_up && hit_y < 2 * the.field.height then os.p2_move <- "up"; *)
-    (*   if move_dn && hit_y > - 2 * the.field.height then os.p2_move <- "down"; *)
-    (* ); *)
+      let move_up = os.p2_pos + half the.paddle.height < hit_y
+      and move_dn = os.p2_pos - half the.paddle.height > hit_y in
+      os.p2_move <- "none";
+      if move_up && hit_y < 2 * the.field.height then os.p2_move <- "up";
+      if move_dn && hit_y > - 2 * the.field.height then os.p2_move <- "down";
+    );
 
 
 
@@ -414,7 +426,6 @@ let calc_next_state os percent_frame =
       (* ball out of bounds, break game *)
       ns.ball <- half the.field.width, half the.field.height;
       ns.state <- "stop";
-      log "STOP";
     end else
       ns.ball <- new_ball;
 
@@ -485,16 +496,19 @@ let render_state state =
   let adjx = (float the.screen.width) /. 256.0
   and adjy = (float the.screen.height) /. 256.0 in
 
-  glTexCoord2f 0.0 0.0;
+  let offx = (x_of state.ball $ float) /. (float the.field.width) /. 2.71
+  and offy = (y_of state.ball $ float) /. (float the.field.height) /. 2.71 in
+
+  glTexCoord2f offx offy;
   glVertex2i 0 0;
 
-  glTexCoord2f adjx 0.0;
+  glTexCoord2f (offx +. adjx) offy;
   glVertex2i the.field.width 0;
 
-  glTexCoord2f adjx adjy;
+  glTexCoord2f (adjx +. offx) (adjy +. offy);
   glVertex2i the.field.width (identity the.field.height);
 
-  glTexCoord2f 0.0 adjy;
+  glTexCoord2f offx (adjy +. offy);
   glVertex2i 0 (identity the.field.height);
 
   glEnd ();
@@ -504,11 +518,11 @@ let render_state state =
 
   draw_paddle padding state.p1_pos state.p1_is_computer;
   draw_paddle (the.field.width - padding) state.p2_pos state.p2_is_computer;
+  glDisable gl_texture_2d;
 
   let bx, by = state.ball
   in
   draw_ball bx by;
-  glDisable gl_texture_2d;
 
   swap_buffers ();
 
