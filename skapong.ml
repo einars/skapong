@@ -21,6 +21,8 @@ let dimension_cm cm = cm * 10
 
 let tau = 6.2831852
 
+let paddle_padding = 150
+
 let radians_of angle = float angle *. tau /. 360.0
 
 let half x = x / 2
@@ -312,23 +314,23 @@ let is_horizontal seg =
 
 let reflecting_thrust pt orig_direction surfaces =
 
-  let rec rethrust pt direction s =
+  let rec rethrust pt direction orig s =
     let trajectory = pt, pt |+ direction in
     match s with
       | wall :: rest -> (
         match intersection_of trajectory wall with
-        | None -> rethrust pt direction rest (* try next wall *)
-        | Point i -> if is_horizontal wall then i |+ (reflect_x direction), (reflect_x direction)
-                                           else i |+ (reflect_y direction), (reflect_y direction)
+        | None -> rethrust pt direction orig rest (* try next wall *)
+        | Point i -> if is_horizontal wall then rethrust i (pt |+ direction |- i $ reflect_x) (reflect_x orig) surfaces
+                                           else rethrust i (pt |+ direction |- i $ reflect_y) (reflect_y orig) surfaces
         (*
         | Point i -> if is_horizontal wall then rethrust i (pt |+ direction |- i |> reflect_x) surfaces
                                            else rethrust i (pt |+ direction |- i |> reflect_y) surfaces
                                            *)
         )
-      | _ -> pt |+ direction, direction (* finished *)
+      | _ -> pt |+ direction, orig (* finished *)
   in
 
-  rethrust pt orig_direction surfaces
+  rethrust pt orig_direction orig_direction surfaces
   (* let pt, last_direction = rethrust pt orig_direction surfaces in *)
   (* let new_direction = make_vector (angle_of last_direction) (length_of orig_direction) in *)
   (* pt, new_direction *)
@@ -361,7 +363,7 @@ let calc_next_state os percent_frame =
     (* a simple AI logic *)
     if ns.p1_is_computer then (
       let hit_y =
-        by + dy * bx / dx in
+        by + dy * bx / (nonnull dx) in
 
       let move_up = os.p1_pos + half the.paddle.height < hit_y
       and move_dn = os.p1_pos - half the.paddle.height > hit_y in
@@ -373,7 +375,7 @@ let calc_next_state os percent_frame =
 
     if ns.p2_is_computer then (
       let hit_y =
-        by + dy * (the.field.width - bx) / dx in
+        by + dy * (the.field.width - bx) / (nonnull dx) in
 
       let move_up = os.p2_pos + half the.paddle.height < hit_y
       and move_dn = os.p2_pos - half the.paddle.height > hit_y in
@@ -400,8 +402,8 @@ let calc_next_state os percent_frame =
     let reflective_surfaces = [
       (0, 0), (the.field.width, 0);
       (0, the.field.height), (the.field.width, the.field.height);
-      (the.paddle.width, os.p1_pos - half the.paddle.height), (the.paddle.width, os.p1_pos + half the.paddle.height);
-      (the.field.width - the.paddle.width, os.p2_pos - half the.paddle.height), (the.field.width - the.paddle.width, os.p2_pos + half the.paddle.height);
+      (paddle_padding + the.paddle.width, os.p1_pos - half the.paddle.height), (paddle_padding + the.paddle.width, os.p1_pos + half the.paddle.height);
+      (the.field.width - the.paddle.width - paddle_padding, os.p2_pos - half the.paddle.height), (the.field.width - the.paddle.width - paddle_padding, os.p2_pos + half the.paddle.height);
     ] in
 
     let new_ball, new_direction = reflecting_thrust os.ball direction reflective_surfaces in
@@ -482,9 +484,6 @@ let render_state state =
 
   glLoadIdentity ();
 
-  let padding = 100 + the.paddle.width / 2
-  in
-
   (* draw background *)
   glEnable gl_texture_2d;
 
@@ -516,8 +515,8 @@ let render_state state =
 
   glEnable gl_texture_2d;
 
-  draw_paddle padding state.p1_pos state.p1_is_computer;
-  draw_paddle (the.field.width - padding) state.p2_pos state.p2_is_computer;
+  draw_paddle paddle_padding state.p1_pos state.p1_is_computer;
+  draw_paddle (the.field.width - paddle_padding) state.p2_pos state.p2_is_computer;
   glDisable gl_texture_2d;
 
   let bx, by = state.ball
