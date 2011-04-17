@@ -240,7 +240,10 @@ let draw_paddle x y is_computer =
   let hh = half the.paddle.height
   and ww = half the.paddle.width
   in
-  glColor3f 1.0 (if is_computer then 0.0 else 1.0) 0.0;
+  if is_computer then
+    glColor3f 0.58 0.10 0.02
+  else
+    glColor3f 0.45 0.81 0.38;
   glBegin gl_quads;
   glVertex2i (x - ww) (y - hh);
   glVertex2i (x + ww) (y - hh);
@@ -253,7 +256,7 @@ let draw_ball x y =
   let fx = float x
   and fy = float y
   and ball_size = 50.0 in
-  glColor3f 0.9 0.9 0.7;
+  glColor3f 0.3 0.3 0.5;
   glBegin gl_quads;
   glVertex2f (fx -. ball_size) (fy -. ball_size);
   glVertex2f (fx +. ball_size) (fy -. ball_size);
@@ -303,7 +306,7 @@ let intersection_of seg1 seg2 =
   else
     let ua = float ((x4 - x3) * (y1 - y3) - (y4 - y3) * (x1 - x3) ) /. float den
     and ub = float ((x2 - x1) * (y1 - y3) - (y2 - y1) * (x1 - x3) ) /. float den in
-    if ua > 0.0 && ua < 1.0 && ub > 0.0 && ub < 1.1 then
+    if ua >= 0.0 && ua <= 1.0 && ub >= 0.0 && ub <= 1.0 then
       Point ( x1 + int_of_float ( ua *. (x2 - x1 $ float) )
             , y1 + int_of_float ( ua *. (y2 - y1 $ float) ) )
     else None
@@ -314,36 +317,24 @@ let is_horizontal seg =
 
 let reflecting_thrust pt orig_direction surfaces =
 
+  (* will probably bug in 50% of cases when there is a double reflection in the corner -
+   * doesn't check which wall is closer *)
+
   let rec rethrust pt direction orig s =
     let trajectory = pt, pt |+ direction in
     match s with
       | wall :: rest -> (
         match intersection_of trajectory wall with
         | None -> rethrust pt direction orig rest (* try next wall *)
-        | Point i -> if is_horizontal wall then rethrust i (pt |+ direction |- i $ reflect_x) (reflect_x orig) surfaces
-                                           else rethrust i (pt |+ direction |- i $ reflect_y) (reflect_y orig) surfaces
-        (*
-        | Point i -> if is_horizontal wall then rethrust i (pt |+ direction |- i |> reflect_x) surfaces
-                                           else rethrust i (pt |+ direction |- i |> reflect_y) surfaces
-                                           *)
+        (* | Point i -> if is_horizontal wall then rethrust i (pt |+ direction |- i $ reflect_x) (reflect_x orig) surfaces *)
+        (*                                    else rethrust i (pt |+ direction |- i $ reflect_y) (reflect_y orig) surfaces *)
+        | Point i -> if is_horizontal wall then i |+ (pt |+ direction |- i $ reflect_x), (reflect_x orig)
+                                           else i |+ (pt |+ direction |- i $ reflect_y), (reflect_y orig)
         )
       | _ -> pt |+ direction, orig (* finished *)
   in
 
   rethrust pt orig_direction orig_direction surfaces
-  (* let pt, last_direction = rethrust pt orig_direction surfaces in *)
-  (* let new_direction = make_vector (angle_of last_direction) (length_of orig_direction) in *)
-  (* pt, new_direction *)
-
-
-let test_thrust () =
-  let seg = (3, 3), (10, 3)
-  in
-  let np, nd = reflecting_thrust (3,0) (5,5) [seg] in
-  log "%s %s" (string_of_pt np) (string_of_vec nd);
-
-  ()
-
 
 
 let nonnull x = if x == 0 then 1 else x
@@ -513,11 +504,8 @@ let render_state state =
   glEnd ();
   glDisable gl_texture_2d;
 
-  glEnable gl_texture_2d;
-
   draw_paddle paddle_padding state.p1_pos state.p1_is_computer;
   draw_paddle (the.field.width - paddle_padding) state.p2_pos state.p2_is_computer;
-  glDisable gl_texture_2d;
 
   let bx, by = state.ball
   in
