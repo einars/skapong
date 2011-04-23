@@ -1,4 +1,4 @@
-FILES = skapong.ml
+FILES = checked.ml skapong.ml
 RESULT  = skapong
 
 LIBDIR = lib
@@ -13,6 +13,7 @@ CLIBS = SDL GL
 SOURCES = ${WIN_SOURCE} ${SDL_SOURCE} ${GL_SOURCE} ${FILES}
 
 
-all: byte-code
+#all: byte-code
+all: debug-code
 include OCamlMakefile
 

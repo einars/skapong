@@ -8,12 +8,14 @@ open Event
 open SDLGL
 open Glcaml
 
-let (|>) a b = b a
-let ($) a b = b a
+open Checked
 
-exception DontUseThis
-let (!=) a b = raise (DontUseThis)
-let (==) a b = raise (DontUseThis)
+let (+) = Checked.plus32
+let (-) = Checked.minus32
+let ( * ) = Checked.mul32
+
+
+let ($) a b = b a
 
 
 (* all size measurements are in millimeters *)
@@ -26,11 +28,15 @@ let dimension_cm cm = cm * 10
 
 let tau = 6.2831852
 
-let paddle_padding = 150
+let paddle_padding = dimension_cm 15
+
+(* paddle movement distance in 1s *)
+let paddle_speed = dimension_cm 400
 
 let radians_of angle = float angle *. tau /. 360.0
 
 let half x = x / 2
+let third x = x / 3
 let middle_of a b = ( a + b ) / 2
 
 type point = int * int
@@ -81,7 +87,6 @@ type the =
   ; mutable fullscreen: bool
   ; field:         dimensions
   ; paddle:        dimensions
-  ; start_time:    float
   ; states:        (string, string) Hashtbl.t
   ; mutable game:  gamestate
   ; mutable game_prev: gamestate
@@ -104,9 +109,8 @@ let the =
 
   ; game       = gamestate_clean
   ; game_prev  = gamestate_clean
-  ; start_time = Unix.gettimeofday ()
   ; states     = Hashtbl.create 4
-  ; hz         = 15
+  ; hz         = 20
   ; fullscreen = false
   ; debug      = false
   }
@@ -148,18 +152,13 @@ let reflect_x vec =
 let reflect_y vec =
   let x, y = vec in x, -y
 
-let length_of vec =
-  let x, y = vec in
-  int_of_float ( sqrt (x * x + y * y $ float) )
+let float_vec vec =
+  let x, y = vec in float x, float y
 
-let angle_of vec =
-  let x, y = vec in
-  if x = 0 then
-    if y = 0 then 0 else if y >= 0 then 90 else 270
-  else
-    if y = 0 then 180 else
-      let r = (atan2 (float y) (float x)) *. 360.0 /. tau $ int_of_float in
-      if r < 0 then r + 360 else r
+let length_of vec =
+  let fx, fy = float_vec vec in
+  sqrt (fx *. fx +. fy *. fy) $ int_of_float
+
 
 let string_of_pt p =
   let x, y = p in sprintf "(%d,%d)" x y
@@ -168,7 +167,26 @@ let string_of_vec v =
   let x, y = v in sprintf "[%d,%d]" x y
 
 
-let reasonable_starting_angle () = 
+let lerp_pt percentage a b =
+  let xa, ya = a
+  and xb, yb = b in
+  xa + (xb - xa) * percentage / 100, ya + (yb - ya) * percentage / 100
+
+let lerp_int percentage a b =
+  a + (b - a) * percentage / 100
+
+let angle_of vec =
+  let x, y = vec in
+  log " angle-of %d %d" x y;
+  if x = 0 then
+    if y = 0 then 0 else if y >= 0 then 90 else 270
+  else
+    if y = 0 then if x > 0 then 0 else 180
+    else let r = (atan2 (float y) (float x)) *. 360.0 /. tau $ int_of_float in
+         if r < 0 then r + 360 else r
+
+
+let reasonable_starting_angle () =
   let angle = Random.int 90 - 45 in
   let a = if Random.int 2 = 1 then 180 + angle else angle in
   if a < 0 then a + 360 else a
@@ -176,14 +194,21 @@ let reasonable_starting_angle () =
 let restart_game () =
   if the.game.state = "stop" then (
     the.game.ball  <- half the.field.width, half the.field.height;
-    the.game.vector <- make_vector (reasonable_starting_angle ()) 300;
+    the.game.vector <- make_vector (reasonable_starting_angle ()) (dimension_m 3);
+    the.game.vector <- make_vector 0  (dimension_m 3);
     the.game.state <- "play";
   )
 
 
 let gl_resize () =
+  glMatrixMode gl_projection;
+  glLoadIdentity ();
   glOrtho 0.0 (float the.field.width) 0.0 (float the.field.height) 0.0 1.0;
-  glMatrixMode gl_modelview
+  glMatrixMode gl_modelview;
+  glLoadIdentity ();
+  glTranslatef 0.375 0.375 0.0;
+  ()
+
 
 
 let texture = Array.make 1 0
@@ -199,9 +224,6 @@ let initialize_video () = (* {{{ *)
     glTexParameteri gl_texture_2d gl_texture_mag_filter gl_linear;
     glTexParameteri gl_texture_2d gl_texture_min_filter gl_linear;
 
-    (*glTexParameteri gl_texture_2d gl_texture_wrap_s gl_repeat;
-    glTexParameteri gl_texture_2d gl_texture_wrap_t gl_repeat;*)
-
     (* 2d texture, level of detail 0 (normal), 3 components (red, green, blue), x size from image, y size from image,
       border 0 (normal), rgb color data, unsigned byte data, and finally the data itself. *)
     log "Loaded %d x %d" (surface_width s) (surface_height s);
@@ -214,8 +236,6 @@ let initialize_video () = (* {{{ *)
     glDisable gl_cull_face;
     glDisable gl_depth_test;
 
-    glMatrixMode gl_projection;
-    glLoadIdentity ();
     glAlphaFunc gl_greater 0.0;
     glEnable gl_alpha_test;
 
@@ -238,13 +258,16 @@ let initialize_video () = (* {{{ *)
   load_textures ();
   () (* }}} *)
 
+
 let toggle_fullscreen () =
   the.fullscreen <- not the.fullscreen;
   initialize_video ()
 
+
 let toggle_debug () =
   the.debug <- not the.debug;
   log "debug %s" (if the.debug then "on" else "off")
+
 
 let draw_paddle x y is_computer =
   let hh = half the.paddle.height
@@ -263,15 +286,13 @@ let draw_paddle x y is_computer =
 
 
 let draw_ball x y =
-  let fx = float x
-  and fy = float y
-  and ball_size = 50.0 in
+  let ball_size = dimension_cm 5 in
   glColor3f 0.3 0.3 0.5;
   glBegin gl_quads;
-  glVertex2f (fx -. ball_size) (fy -. ball_size);
-  glVertex2f (fx +. ball_size) (fy -. ball_size);
-  glVertex2f (fx +. ball_size) (fy +. ball_size);
-  glVertex2f (fx -. ball_size) (fy +. ball_size);
+  glVertex2i (x - ball_size) (y - ball_size);
+  glVertex2i (x + ball_size) (y - ball_size);
+  glVertex2i (x + ball_size) (y + ball_size);
+  glVertex2i (x - ball_size) (y + ball_size);
   glEnd ()
 
 
@@ -281,9 +302,6 @@ let clamp v lo hi =
   else if v > hi then hi
   else v
 
-
-let is_between n lo hi =
-  (n > lo && n <= hi) || (n <= lo && n > hi)
 
 
 let state statename =
@@ -302,20 +320,29 @@ let vector_of seg =
   (x2 - x1), (y2 - y1)
 
 let intersection_of seg1 seg2 =
-  let (x1, y1),(x2, y2) = seg1
-  and (x3, y3),(x4, y4) = seg2 in
+  let (ax1, ay1),(ax2, ay2) = seg1
+  and (ax3, ay3),(ax4, ay4) = seg2 in
 
-  let den = (y4 - y3) * (x2 - x1) - (x4 - x3) * (y2 - y1) in
-  if den = 0 then None
+  let x1 = float ax1
+  and x2 = float ax2
+  and x3 = float ax3
+  and x4 = float ax4
+  and y1 = float ay1
+  and y2 = float ay2
+  and y3 = float ay3
+  and y4 = float ay4 in
+
+  let den = (y4 -. y3) *. (x2 -. x1) -. (x4 -. x3) *. (y2 -. y1) in
+  if abs_float den < 0.001 then None
   else
-    let ua = float ((x4 - x3) * (y1 - y3) - (y4 - y3) * (x1 - x3) ) /. float den
-    and ub = float ((x2 - x1) * (y1 - y3) - (y2 - y1) * (x1 - x3) ) /. float den in
-    if ua >= 0.0 && ua <= 1.0 && ub >= 0.0 && ub <= 1.0 then
-      Point ( x1 + int_of_float ( ua *. (x2 - x1 $ float) )
-            , y1 + int_of_float ( ua *. (y2 - y1 $ float) ) )
-    else None
+    let ua = ((x4 -. x3) *. (y1 -. y3) -. (y4 -. y3) *. (x1 -. x3) ) /. den
+    and ub = ((x2 -. x1) *. (y1 -. y3) -. (y2 -. y1) *. (x1 -. x3) ) /. den in
+    if ua >= 0.0 && ua <= 1.0 && ub >= 0.0 && ub <= 1.0 then begin
+      Point ( x1 +. ua *. (x2 -. x1) $ int_of_float
+            , y1 +. ua *. (y2 -. y1) $ int_of_float)
+    end else None
 
-let is_horizontal seg =
+let is_vertical seg =
   let (x1, _), (x2, _) = seg in x1 = x2
 
 let get_adjusted_reflection_angle wall pt =
@@ -342,41 +369,80 @@ let adj_angle new_angle vector =
 
 
 
-let reflecting_thrust pt orig_direction surfaces =
-
-  let rec rethrust pt direction orig s =
-    let trajectory = pt, pt |+ direction in
-    match s with
+(*
+ full_movement: movement vector in 1s
+ partial_movement: remaining lerped movement vector
+*)
+let rec reflecting_thrust_ex ball_pos partial_movement full_movement surfaces =
+(* actually we should sort surfaces by proximity *)
+    let trajectory = ball_pos, ball_pos |+ partial_movement in
+    match surfaces with
       | (name, pt1, pt2) :: rest -> (
         let wall = pt1, pt2 in
         match intersection_of trajectory wall with
-        | None -> rethrust pt direction orig rest (* try next wall *)
+        | None -> reflecting_thrust_ex ball_pos partial_movement full_movement rest (* try next wall *)
         | Point i ->
-            ilog "reflecting %s (pt=%s, vec=%s, refl=%s)" name (string_of_pt pt) (string_of_pt direction) (string_of_pt i);
-            if is_horizontal wall
-            then begin
+            let wa, wb = wall in
+            log "ball %s reflecting %s [%s:%s] (intersect @ %s) while full_m=%s, partial_m=%s"
+              (string_of_pt ball_pos)
+              name
+              (string_of_pt wa)
+              (string_of_pt wb)
+              (string_of_pt i)
+              (string_of_vec full_movement)
+              (string_of_vec partial_movement);
+
+            if is_vertical wall then begin
+              log "bam!";
               let new_angle = get_adjusted_reflection_angle wall i in
-              i |+ (pt |+ direction |- i $ adj_angle new_angle), (adj_angle new_angle orig)
+              i |+ (ball_pos |+ partial_movement |- i $ adj_angle new_angle), (adj_angle new_angle full_movement)
             end
-            else i |+ (pt |+ direction |- i $ reflect_y), (reflect_y orig)
+            else i |+ (ball_pos |+ partial_movement |- i $ reflect_y), (reflect_y full_movement)
         )
-      | _ -> pt |+ direction, orig (* finished *)
-  in
+      | _ -> ball_pos |+ partial_movement, full_movement
 
-  rethrust pt orig_direction orig_direction surfaces
-
+let reflecting_thrust a b c d =
+  let new_pos, new_dir = reflecting_thrust_ex a b c d in
+  log "ball %s -> %s, dir %s -> %s"
+    (string_of_pt a)
+    (string_of_pt new_pos)
+    (string_of_vec c)
+    (string_of_vec new_dir);
+  new_pos, new_dir
 
 let nonnull x = if x = 0 then 1 else x
 
-let calc_next_state os percent_frame =
 
-  if os.state <> "play" || percent_frame = 0
+
+let lerp_gamestate percentage p1 p2 =
+  let ns = { p1 with state = p1.state } (* new state *)
+
+  in
+
+  ns.p1_pos <- lerp_int percentage p1.p1_pos p2.p1_pos;
+  ns.p2_pos <- lerp_int percentage p1.p2_pos p2.p2_pos;
+  ns.ball   <- lerp_pt percentage p1.ball p2.ball;
+
+  ns
+
+
+
+
+
+let calc_next_state os advance_ms =
+
+  if os.state <> "play" || advance_ms = 0
   then os
   else begin
     let ns = { os with state = os.state } (* new state *)
-    and inc = ((dimension_m 6) / the.hz) * percent_frame / 100
 
-    and direction = os.vector |% percent_frame in
+    (* dx, dy are in unit/s *)
+
+    and percent_adv = advance_ms / 10 in (* 1s = 100% *)
+
+    let direction = os.vector |% percent_adv in
+
+    let paddle_inc = paddle_speed * percent_adv / 100 in
 
     let bx, by = os.ball and dx, dy = direction in
 
@@ -385,8 +451,8 @@ let calc_next_state os percent_frame =
       let hit_y =
         by - dy * bx / (nonnull dx) in
 
-      let move_up = os.p1_pos + half the.paddle.height < hit_y
-      and move_dn = os.p1_pos - half the.paddle.height > hit_y in
+      let move_up = os.p1_pos + third the.paddle.height < hit_y
+      and move_dn = os.p1_pos - third the.paddle.height > hit_y in
       os.p1_move <- "none";
       if move_up && hit_y < 2 * the.field.height then os.p1_move <- "up";
       if move_dn && hit_y > - 2 * the.field.height then os.p1_move <- "down";
@@ -397,8 +463,8 @@ let calc_next_state os percent_frame =
       let hit_y =
         by + dy * (the.field.width - bx) / (nonnull dx) in
 
-      let move_up = os.p2_pos + half the.paddle.height < hit_y
-      and move_dn = os.p2_pos - half the.paddle.height > hit_y in
+      let move_up = os.p2_pos + third the.paddle.height < hit_y
+      and move_dn = os.p2_pos - third the.paddle.height > hit_y in
       os.p2_move <- "none";
       if move_up && hit_y < 2 * the.field.height then os.p2_move <- "up";
       if move_dn && hit_y > - 2 * the.field.height then os.p2_move <- "down";
@@ -406,11 +472,11 @@ let calc_next_state os percent_frame =
 
 
 
-    if os.p1_move = "up"        then ns.p1_pos <- os.p1_pos + inc
-    else if os.p1_move = "down" then ns.p1_pos <- os.p1_pos - inc;
+    if os.p1_move = "up"        then ns.p1_pos <- os.p1_pos + paddle_inc
+    else if os.p1_move = "down" then ns.p1_pos <- os.p1_pos - paddle_inc;
 
-    if os.p2_move = "up"        then ns.p2_pos <- os.p2_pos + inc
-    else if os.p2_move = "down" then ns.p2_pos <- os.p2_pos - inc;
+    if os.p2_move = "up"        then ns.p2_pos <- os.p2_pos + paddle_inc
+    else if os.p2_move = "down" then ns.p2_pos <- os.p2_pos - paddle_inc;
 
     let paddle_clip_lo = half the.paddle.height
     and paddle_clip_hi = the.field.height - half the.paddle.height
@@ -426,7 +492,7 @@ let calc_next_state os percent_frame =
       "up", (0, the.field.height), (the.field.width, the.field.height);
     ] in
 
-    let new_ball, new_direction = reflecting_thrust os.ball direction reflective_surfaces in
+    let new_ball, new_direction = reflecting_thrust os.ball direction os.vector reflective_surfaces in
 
     ns.vector <- new_direction;
     ns.ball <- new_ball;
@@ -445,9 +511,9 @@ let calc_next_state os percent_frame =
 
 
 
-let do_tick () =
+let do_tick advance_ms =
 
-  ilog "tick";
+  the.game_prev <- the.game;
 
   if the.game.state = "play" then (
     let p1_up = state "1U" = "T"
@@ -474,8 +540,7 @@ let do_tick () =
 
   );
 
-  the.game_prev <- the.game;
-  the.game <- calc_next_state the.game 100;
+  the.game <- calc_next_state the.game advance_ms;
 
   ()
 
@@ -484,8 +549,6 @@ let do_tick () =
 
 
 let render_state state =
-  let identity x = x in
-
   glClearColor 0.1 0.1 0.1 0.0;
 
   glClear gl_color_buffer_bit;
@@ -513,10 +576,10 @@ let render_state state =
   glVertex2i the.field.width 0;
 
   glTexCoord2f (adjx +. offx) (adjy +. offy);
-  glVertex2i the.field.width (identity the.field.height);
+  glVertex2i the.field.width the.field.height;
 
   glTexCoord2f offx (adjy +. offy);
-  glVertex2i 0 (identity the.field.height);
+  glVertex2i 0 the.field.height;
 
   glEnd ();
   glDisable gl_texture_2d;
@@ -536,10 +599,8 @@ let render_state state =
 
 
 
-let render_lerp percent_frame =
-  (* calculate lerped ball using engine, very good *)
-  ilog "render %d" percent_frame;
-  calc_next_state the.game_prev percent_frame |> render_state
+let render_lerp percentage =
+  lerp_gamestate percentage the.game_prev the.game $ render_state
 
 
 let rec paddle_state statename newstate =
@@ -612,72 +673,31 @@ let rec process_events () =
   process_events ()
 
 
-let rec main_loop_v1 last_frame =
+let period = 1000 / the.hz
 
-  let period = 1.0 /. (float the.hz) in
-
-  let now = Unix.gettimeofday() in
-  let tick_diff = now -. last_frame in
-  let new_frame = tick_diff > period in
-  let new_last_frame =
-    if new_frame then begin
-      try
-        process_events ();
-      with No_more_events -> ();
-      do_tick ();
-      now
-    end else last_frame
-  in
-    (int_of_float (100.0 *. tick_diff /. period) mod 100) |> render_lerp;
-  main_loop_v1 new_last_frame
+let rec main_loop expected_frame =
 
 
-let rec main_loop_v2 expected_frame =
-
-  let period = 1.0 /. (float the.hz) in
-
-  let now = Unix.gettimeofday() in
+  let now = get_ticks () in
 
   if now > expected_frame then begin
-    try
-      process_events ();
+
+    try process_events ();
     with No_more_events -> ();
-    do_tick ();
-    let tick_diff = now -. expected_frame in
-    (* log "1diff=%.04f, period=%.04f" tick_diff period; *)
-    (int_of_float (100.0 *. tick_diff /. period) mod 100) |> render_lerp;
-    let next_frame =
-      if expected_frame +. period < now
-      then begin printf "weird-adj"; now
-      end else expected_frame +. period in
-    main_loop_v2 next_frame;
+
+    let tick_diff = now - expected_frame in
+    ilog "FRAME +%d" (period + tick_diff);
+    do_tick period;
+
+    main_loop (expected_frame + period);
   end else begin
-    let tick_diff = (period -. (expected_frame -. now)) in
-    (* log "2diff=%.04f, period=%.04f" tick_diff period; *)
-    (int_of_float (100.0 *. tick_diff /. period) mod 100) |> render_lerp;
-    main_loop_v2 expected_frame
+    let tick_diff = (period - (expected_frame - now)) in
+    if tick_diff > 0 then begin
+      tick_diff * 100 / period $ render_lerp;
+    end;
+    main_loop expected_frame
   end
 
-
-let rec main_loop_fuckall () =
-
-
-  the.hz <- 80;
-
-  let now = Timer.get_ticks() in
-  render_lerp 0;
-  try process_events () with No_more_events -> ();
-  do_tick ();
-
-  let delay = (1000 / the.hz) - (Timer.get_ticks() - now) in
-  if delay > 0 then Timer.delay delay;
-
-  main_loop_fuckall ()
-
-
-let main_loop () =
-  Unix.gettimeofday () |> main_loop_v2
-  (* main_loop_fuckall () *)
 
 let main () =
   (* test_thrust (); exit 9; *)
@@ -686,7 +706,7 @@ let main () =
   set_caption "Skapong, the boring pong" "skapong";
   initialize_video ();
   restart_game ();
-  main_loop ()
+  get_ticks () $ main_loop
 
 
 let _ = main ()
