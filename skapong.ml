@@ -11,6 +11,11 @@ open Glcaml
 let (|>) a b = b a
 let ($) a b = b a
 
+exception DontUseThis
+let (!=) a b = raise (DontUseThis)
+let (==) a b = raise (DontUseThis)
+
+
 (* all size measurements are in millimeters *)
 (* meters/centimeters -> millimeters *)
 type dimension = int
@@ -115,7 +120,6 @@ let x_make_vector angle length =
 
 let make_vector a l =
   let x1, x2 = x_make_vector a l in
-  log "Vector (a = %d, l = %d) -> (%d, %d)" a l x1 x2;
   x1, x2
 
 let x_of pt =
@@ -150,11 +154,12 @@ let length_of vec =
 
 let angle_of vec =
   let x, y = vec in
-  if x == 0 then
+  if x = 0 then
     if y = 0 then 0 else if y >= 0 then 90 else 270
   else
     if y = 0 then 180 else
-    ((float y) /. (float x) $ atan) *. 360.0 /. tau $ int_of_float
+      let r = (atan2 (float y) (float x)) *. 360.0 /. tau $ int_of_float in
+      if r < 0 then r + 360 else r
 
 let string_of_pt p =
   let x, y = p in sprintf "(%d,%d)" x y
@@ -163,10 +168,15 @@ let string_of_vec v =
   let x, y = v in sprintf "[%d,%d]" x y
 
 
+let reasonable_starting_angle () = 
+  let angle = Random.int 90 - 45 in
+  let a = if Random.int 2 = 1 then 180 + angle else angle in
+  if a < 0 then a + 360 else a
+
 let restart_game () =
   if the.game.state = "stop" then (
     the.game.ball  <- half the.field.width, half the.field.height;
-    the.game.vector <- make_vector (Random.int 360) 300;
+    the.game.vector <- make_vector (reasonable_starting_angle ()) 300;
     the.game.state <- "play";
   )
 
@@ -286,12 +296,6 @@ let set_state statename value =
   Hashtbl.replace the.states statename value
 
 
-let choose_angle percentage =
-  (* convert (-1.0 .. 1.0) to (10..170) range *)
-  let adj_base = 20.0 in
-  (Random.int 5) - 2 +
-  clamp (adj_base +. 0.5 *. (180.0 -. adj_base) *. (percentage +. 1.0) |> int_of_float) (int_of_float adj_base) (int_of_float (180.0 -. adj_base))
-
 
 let vector_of seg =
   let (x1, y1),(x2, y2) = seg in
@@ -302,7 +306,7 @@ let intersection_of seg1 seg2 =
   and (x3, y3),(x4, y4) = seg2 in
 
   let den = (y4 - y3) * (x2 - x1) - (x4 - x3) * (y2 - y1) in
-  if den == 0 then None
+  if den = 0 then None
   else
     let ua = float ((x4 - x3) * (y1 - y3) - (y4 - y3) * (x1 - x3) ) /. float den
     and ub = float ((x2 - x1) * (y1 - y3) - (y2 - y1) * (x1 - x3) ) /. float den in
@@ -314,22 +318,47 @@ let intersection_of seg1 seg2 =
 let is_horizontal seg =
   let (x1, _), (x2, _) = seg in x1 = x2
 
+let get_adjusted_reflection_angle wall pt =
+  (* wall guaranteed to be vertical, it is a paddle *)
+  (* returns 0..50 (0 = go directly back, 50 = max reflection *)
+  let _, by = pt
+  and (_, wy1), (_, wy2) = wall in
+  let coeff = 100 * (wy2 - by) / (wy2 - wy1) in
+  log "coef %d" coeff;
+  if coeff > 50 then 50 - (100 - coeff) else 50 - coeff
+
+let adj_angle new_angle vector =
+    let length = 105 * (length_of vector) / 100
+    and cur_angle = angle_of vector in
+
+    log "cur_angle %d -> %d" cur_angle new_angle;
+
+    make_vector
+        (if cur_angle > 0 && cur_angle <= 90 then 180 - new_angle
+        else if cur_angle > 90 && cur_angle <= 180 then new_angle
+        else if cur_angle > 180 && cur_angle <= 270 then 360 - new_angle
+        else 180 + new_angle)
+        length
+
+
 
 let reflecting_thrust pt orig_direction surfaces =
-
-  (* will probably bug in 50% of cases when there is a double reflection in the corner -
-   * doesn't check which wall is closer *)
 
   let rec rethrust pt direction orig s =
     let trajectory = pt, pt |+ direction in
     match s with
-      | wall :: rest -> (
+      | (name, pt1, pt2) :: rest -> (
+        let wall = pt1, pt2 in
         match intersection_of trajectory wall with
         | None -> rethrust pt direction orig rest (* try next wall *)
-        (* | Point i -> if is_horizontal wall then rethrust i (pt |+ direction |- i $ reflect_x) (reflect_x orig) surfaces *)
-        (*                                    else rethrust i (pt |+ direction |- i $ reflect_y) (reflect_y orig) surfaces *)
-        | Point i -> if is_horizontal wall then i |+ (pt |+ direction |- i $ reflect_x), (reflect_x orig)
-                                           else i |+ (pt |+ direction |- i $ reflect_y), (reflect_y orig)
+        | Point i ->
+            ilog "reflecting %s (pt=%s, vec=%s, refl=%s)" name (string_of_pt pt) (string_of_pt direction) (string_of_pt i);
+            if is_horizontal wall
+            then begin
+              let new_angle = get_adjusted_reflection_angle wall i in
+              i |+ (pt |+ direction |- i $ adj_angle new_angle), (adj_angle new_angle orig)
+            end
+            else i |+ (pt |+ direction |- i $ reflect_y), (reflect_y orig)
         )
       | _ -> pt |+ direction, orig (* finished *)
   in
@@ -337,7 +366,7 @@ let reflecting_thrust pt orig_direction surfaces =
   rethrust pt orig_direction orig_direction surfaces
 
 
-let nonnull x = if x == 0 then 1 else x
+let nonnull x = if x = 0 then 1 else x
 
 let calc_next_state os percent_frame =
 
@@ -391,36 +420,24 @@ let calc_next_state os percent_frame =
 
 
     let reflective_surfaces = [
-      (0, 0), (the.field.width, 0);
-      (0, the.field.height), (the.field.width, the.field.height);
-      (paddle_padding + the.paddle.width, os.p1_pos - half the.paddle.height), (paddle_padding + the.paddle.width, os.p1_pos + half the.paddle.height);
-      (the.field.width - the.paddle.width - paddle_padding, os.p2_pos - half the.paddle.height), (the.field.width - the.paddle.width - paddle_padding, os.p2_pos + half the.paddle.height);
+      "left-paddle", (paddle_padding + the.paddle.width, os.p1_pos - half the.paddle.height), (paddle_padding + the.paddle.width, os.p1_pos + half the.paddle.height);
+      "right-paddle", (the.field.width - the.paddle.width - paddle_padding, os.p2_pos - half the.paddle.height), (the.field.width - the.paddle.width - paddle_padding, os.p2_pos + half the.paddle.height);
+      "down", (0, 0), (the.field.width, 0);
+      "up", (0, the.field.height), (the.field.width, the.field.height);
     ] in
 
     let new_ball, new_direction = reflecting_thrust os.ball direction reflective_surfaces in
 
     ns.vector <- new_direction;
-
-      (*
-      ns.ltr <- true;
-      ns.angle <- choose_angle (2.0 *. float (ns.p1_pos - !ny) /. (float the.paddle.height));
-      ns.speed <- ns.speed + (dimension_m 5);
-      *)
-
-      (*
-        ns.ltr <- false;
-        ns.angle <- choose_angle (2.0 *. float (ns.p2_pos - !ny) /. (float the.paddle.height));
-        ns.speed <- ns.speed + (dimension_m 5);
-        *)
+    ns.ball <- new_ball;
 
     let nx, _ = new_ball in
-    if nx > the.field.width || nx <= 0
+    if nx >= the.field.width || nx <= 0
     then begin
       (* ball out of bounds, break game *)
       ns.ball <- half the.field.width, half the.field.height;
       ns.state <- "stop";
-    end else
-      ns.ball <- new_ball;
+    end;
 
     ns
 
@@ -523,11 +540,6 @@ let render_lerp percent_frame =
   (* calculate lerped ball using engine, very good *)
   ilog "render %d" percent_frame;
   calc_next_state the.game_prev percent_frame |> render_state
-
-
-let rec random_nonnull lo hi =
-  let x = lo + Random.int (hi - lo) in
-  if x = 0 then random_nonnull lo hi else x
 
 
 let rec paddle_state statename newstate =
@@ -636,8 +648,8 @@ let rec main_loop_v2 expected_frame =
     (int_of_float (100.0 *. tick_diff /. period) mod 100) |> render_lerp;
     let next_frame =
       if expected_frame +. period < now
-      then now
-      else expected_frame +. period in
+      then begin printf "weird-adj"; now
+      end else expected_frame +. period in
     main_loop_v2 next_frame;
   end else begin
     let tick_diff = (period -. (expected_frame -. now)) in

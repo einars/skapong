@@ -13,6 +13,6 @@ CLIBS = SDL GL
 SOURCES = ${WIN_SOURCE} ${SDL_SOURCE} ${GL_SOURCE} ${FILES}
 
 
-all: native-code
+all: byte-code
 include OCamlMakefile
 
