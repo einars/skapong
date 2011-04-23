@@ -1,4 +1,4 @@
-FILES = skapong.ml
+FILES = checked.ml skapong.ml
 RESULT  = skapong
 
 LIBDIR = lib

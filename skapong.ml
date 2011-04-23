@@ -110,7 +110,7 @@ let the =
   ; game       = gamestate_clean
   ; game_prev  = gamestate_clean
   ; states     = Hashtbl.create 4
-  ; hz         = 20
+  ; hz         = 40
   ; fullscreen = false
   ; debug      = false
   }
@@ -373,14 +373,14 @@ let adj_angle new_angle vector =
  full_movement: movement vector in 1s
  partial_movement: remaining lerped movement vector
 *)
-let rec reflecting_thrust_ex ball_pos partial_movement full_movement surfaces =
+let rec reflecting_thrust ball_pos partial_movement full_movement surfaces =
 (* actually we should sort surfaces by proximity *)
     let trajectory = ball_pos, ball_pos |+ partial_movement in
     match surfaces with
       | (name, pt1, pt2) :: rest -> (
         let wall = pt1, pt2 in
         match intersection_of trajectory wall with
-        | None -> reflecting_thrust_ex ball_pos partial_movement full_movement rest (* try next wall *)
+        | None -> reflecting_thrust ball_pos partial_movement full_movement rest (* try next wall *)
         | Point i ->
             let wa, wb = wall in
             log "ball %s reflecting %s [%s:%s] (intersect @ %s) while full_m=%s, partial_m=%s"
@@ -401,8 +401,8 @@ let rec reflecting_thrust_ex ball_pos partial_movement full_movement surfaces =
         )
       | _ -> ball_pos |+ partial_movement, full_movement
 
-let reflecting_thrust a b c d =
-  let new_pos, new_dir = reflecting_thrust_ex a b c d in
+let dbg_reflecting_thrust a b c d =
+  let new_pos, new_dir = reflecting_thrust a b c d in
   log "ball %s -> %s, dir %s -> %s"
     (string_of_pt a)
     (string_of_pt new_pos)
@@ -675,8 +675,33 @@ let rec process_events () =
 
 let period = 1000 / the.hz
 
-let rec main_loop expected_frame =
+let rec main_loop last_time accumulator =
 
+  try process_events ();
+  with No_more_events -> ();
+
+  let rec eat_physics accumulator =
+    if accumulator >= period then begin
+      ilog "tick";
+      do_tick period;
+      eat_physics (accumulator - period)
+    end else accumulator
+
+  in
+
+  let time = get_ticks () in
+  let frame_time = time - last_time in
+  let frame_time = if frame_time > 25 then 25 else frame_time in
+
+  ilog "oompf";
+  let accumulator = (accumulator + frame_time) $ eat_physics in
+
+  accumulator * 100 / period $ render_lerp;
+  delay 5;
+  main_loop time accumulator
+
+
+let rec ex_main_loop expected_frame =
 
   let now = get_ticks () in
 
@@ -706,7 +731,7 @@ let main () =
   set_caption "Skapong, the boring pong" "skapong";
   initialize_video ();
   restart_game ();
-  get_ticks () $ main_loop
+  main_loop (get_ticks ()) 0
 
 
 let _ = main ()
