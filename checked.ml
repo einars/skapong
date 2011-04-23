@@ -85,3 +85,8 @@ module Checked = struct
   let minus a b = plus a (- b)
   let minus32 a b = plus32 a (- b)
 end
+
+let (+) = Checked.plus32
+let (-) = Checked.minus32
+let ( * ) = Checked.mul32
+

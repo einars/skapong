@@ -8,45 +8,15 @@ open Event
 open SDLGL
 open Glcaml
 
-open Checked
-
-let (+) = Checked.plus32
-let (-) = Checked.minus32
-let ( * ) = Checked.mul32
-
-
-let ($) a b = b a
+open Common
 
 
 (* all size measurements are in millimeters *)
 (* meters/centimeters -> millimeters *)
-type dimension = int
-
-let dimension_m m = m * 1000
-
-let dimension_cm cm = cm * 10
-
-let tau = 6.2831852
-
 let paddle_padding = dimension_cm 15
 
 (* paddle movement distance in 1s *)
 let paddle_speed = dimension_cm 400
-
-let radians_of angle = float angle *. tau /. 360.0
-
-let half x = x / 2
-let third x = x / 3
-let middle_of a b = ( a + b ) / 2
-
-type point = int * int
-
-type intersection = None | Point of point
-
-type dimensions =
-  { mutable width:  dimension
-  ; mutable height: dimension
-  }
 
 type gamestate =
   { mutable ball:    dimension * dimension (* current position *)
@@ -117,73 +87,6 @@ let the =
 
 let log m  = kprintf (fun m -> try printf "%s\n%!" m with _ -> () ) m
 let ilog m = kprintf (fun m -> if the.debug then log "%s" m) m (* ignore log *)
-
-let x_make_vector angle length =
-  (float length) *. cos ( radians_of angle ) $ int_of_float,
-  (float length) *. sin ( radians_of angle ) $ int_of_float
-
-let make_vector a l =
-  let x1, x2 = x_make_vector a l in
-  x1, x2
-
-let x_of pt =
-  let x, _ = pt in x
-
-let y_of pt =
-  let _, y = pt in y
-
-let (|+) pt vec =
-  let x, y = pt
-  and dx, dy = vec in
-  x + dx, y + dy
-
-let (|-) pt vec =
-  let x, y = pt
-  and dx, dy = vec in
-  x - dx, y - dy
-
-let (|%) vec percentage =
-  let x, y = vec in
-  x * percentage / 100, y * percentage / 100
-
-let reflect_x vec =
-  let x, y = vec in -x, y
-
-let reflect_y vec =
-  let x, y = vec in x, -y
-
-let float_vec vec =
-  let x, y = vec in float x, float y
-
-let length_of vec =
-  let fx, fy = float_vec vec in
-  sqrt (fx *. fx +. fy *. fy) $ int_of_float
-
-
-let string_of_pt p =
-  let x, y = p in sprintf "(%d,%d)" x y
-
-let string_of_vec v =
-  let x, y = v in sprintf "[%d,%d]" x y
-
-
-let lerp_pt percentage a b =
-  let xa, ya = a
-  and xb, yb = b in
-  xa + (xb - xa) * percentage / 100, ya + (yb - ya) * percentage / 100
-
-let lerp_int percentage a b =
-  a + (b - a) * percentage / 100
-
-let angle_of vec =
-  let x, y = vec in
-  log " angle-of %d %d" x y;
-  if x = 0 then
-    if y = 0 then 0 else if y >= 0 then 90 else 270
-  else
-    if y = 0 then if x > 0 then 0 else 180
-    else let r = (atan2 (float y) (float x)) *. 360.0 /. tau $ int_of_float in
-         if r < 0 then r + 360 else r
 
 
 let reasonable_starting_angle () =
@@ -297,12 +200,6 @@ let draw_ball x y =
 
 
 
-let clamp v lo hi =
-  if v < lo then lo
-  else if v > hi then hi
-  else v
-
-
 
 let state statename =
   try
@@ -315,9 +212,8 @@ let set_state statename value =
 
 
 
-let vector_of seg =
-  let (x1, y1),(x2, y2) = seg in
-  (x2 - x1), (y2 - y1)
+
+type intersection = None | Point of point
 
 let intersection_of seg1 seg2 =
   let (ax1, ay1),(ax2, ay2) = seg1
@@ -341,9 +237,6 @@ let intersection_of seg1 seg2 =
       Point ( x1 +. ua *. (x2 -. x1) $ int_of_float
             , y1 +. ua *. (y2 -. y1) $ int_of_float)
     end else None
-
-let is_vertical seg =
-  let (x1, _), (x2, _) = seg in x1 = x2
 
 let get_adjusted_reflection_angle wall pt =
   (* wall guaranteed to be vertical, it is a paddle *)
