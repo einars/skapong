@@ -1,4 +1,0 @@
-make -f Makefile.win32
-if [ -f skapong.exe ]; then
- mkwinapp/mkwinapp.exe skapong.exe
-fi
