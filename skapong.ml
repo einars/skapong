@@ -383,7 +383,7 @@ let calc_next_state os percent_frame =
     (* a simple AI logic *)
     if ns.p1_is_computer then (
       let hit_y =
-        by + dy * bx / (nonnull dx) in
+        by - dy * bx / (nonnull dx) in
 
       let move_up = os.p1_pos + half the.paddle.height < hit_y
       and move_dn = os.p1_pos - half the.paddle.height > hit_y in
