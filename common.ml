@@ -5,11 +5,13 @@ let ($) a b = b a
 
 type dimension = int
 
+let dimension_mm mm = mm * 10
 
-let dimension_m m = m * 1000
+let dimension_cm cm = cm * 10 $ dimension_mm
+
+let dimension_m m = m * 1000 $ dimension_mm
 
 
-let dimension_cm cm = cm * 10
 
 
 let tau = 6.2831852

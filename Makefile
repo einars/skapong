@@ -23,7 +23,7 @@ endif
 all:$(TARGET)
 	$(POST)
 
-run:
+run:$(TARGET)
 	OCAMLRUNPARAM=b ./skapong
 
 

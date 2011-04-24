@@ -40,7 +40,7 @@ let gamestate_clean =
   { ball    = 0, 0
   ; vector  = 1, 1
 
-  ; p1_pos  = 0
+  ; p1_pos  = dimension_cm 350
   ; p2_pos  = 0
   ; state   = "stop"
   ; p1_move = "none"
@@ -97,8 +97,10 @@ let reasonable_starting_angle () =
 let restart_game () =
   if the.game.state = "stop" then (
     the.game.ball  <- half the.field.width, half the.field.height;
-    the.game.vector <- make_vector (reasonable_starting_angle ()) (dimension_m 3);
-    the.game.vector <- make_vector 0  (dimension_m 3);
+    if the.debug
+    then the.game.vector <- make_vector 0  (dimension_m 4)
+    else the.game.vector <- make_vector (reasonable_starting_angle ()) (dimension_m 3);
+
     the.game.state <- "play";
   )
 
@@ -241,6 +243,7 @@ let intersection_of seg1 seg2 =
 let get_adjusted_reflection_angle wall pt =
   (* wall guaranteed to be vertical, it is a paddle *)
   (* returns 0..50 (0 = go directly back, 50 = max reflection *)
+  (* TK: just drop a random here *)
   let _, by = pt
   and (_, wy1), (_, wy2) = wall in
   let coeff = 100 * (wy2 - by) / (wy2 - wy1) in
@@ -251,7 +254,7 @@ let adj_angle new_angle vector =
     let length = 105 * (length_of vector) / 100
     and cur_angle = angle_of vector in
 
-    log "cur_angle %d -> %d" cur_angle new_angle;
+    log "cur_angle of %s: %d -> %d" (string_of_vec vector) cur_angle new_angle;
 
     make_vector
         (if cur_angle > 0 && cur_angle <= 90 then 180 - new_angle
@@ -586,35 +589,12 @@ let rec main_loop last_time accumulator =
   let frame_time = time - last_time in
   let frame_time = if frame_time > 25 then 25 else frame_time in
 
-  ilog "oompf";
   let accumulator = (accumulator + frame_time) $ eat_physics in
 
+  accumulator * 100 / period $ ilog "oompf %d";
   accumulator * 100 / period $ render_lerp;
   delay 5;
   main_loop time accumulator
-
-
-let rec ex_main_loop expected_frame =
-
-  let now = get_ticks () in
-
-  if now > expected_frame then begin
-
-    try process_events ();
-    with No_more_events -> ();
-
-    let tick_diff = now - expected_frame in
-    ilog "FRAME +%d" (period + tick_diff);
-    do_tick period;
-
-    main_loop (expected_frame + period);
-  end else begin
-    let tick_diff = (period - (expected_frame - now)) in
-    if tick_diff > 0 then begin
-      tick_diff * 100 / period $ render_lerp;
-    end;
-    main_loop expected_frame
-  end
 
 
 let main () =
