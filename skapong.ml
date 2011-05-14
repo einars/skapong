@@ -149,7 +149,7 @@ let initialize_video () = (* {{{ *)
     set_attribute DOUBLEBUFFER 1;
 
     ignore( set_video_mode the.screen.width the.screen.height 0 flags );
-    (* Video.show_cursor the.fullscreen; *)
+    Video.show_cursor the.fullscreen;
 
   in
 
