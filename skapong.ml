@@ -678,10 +678,10 @@ let rec process_events () =
                   exit 0;
                 end;
             | K_RETURN ->
-                if k.keystate = PRESSED then begin
+                if k.keystate = RELEASED then begin
                   if List.exists (fun x -> x = KMOD_LALT) k.modifiers
                   then toggle_fullscreen ()
-                  else start_game ();
+                  else start_game ()
                 end;
             | K_F ->
                 if k.keystate = PRESSED then toggle_fullscreen ();
