@@ -6,7 +6,7 @@ open Common
 let audio_initialized = ref false
 let audio_initialized_successfully = ref false
 
-let init_audio () =
+let initialize_audio () =
   try
     audio_initialized := true;
     Mix.open_audio 44100 Audio.S16 Audio.STEREO 512;
@@ -23,7 +23,7 @@ class wav_file file_name =
     method initialize () =
       we_are_initialized <- true;
       log "initialize %s" file_name;
-      if not !audio_initialized then init_audio ();
+      if not !audio_initialized then initialize_audio ();
       if !audio_initialized_successfully then begin
         chunk <- Some (Mix.load_wav file_name);
         we_are_initialized_successfully <- true;

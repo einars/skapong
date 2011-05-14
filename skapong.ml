@@ -131,7 +131,7 @@ let paddle1_reflection_sound = new wav_file "balls/reflection-paddle-1.wav"
 let paddle2_reflection_sound = new wav_file "balls/reflection-paddle-2.wav"
 let ball_lost_sound = new wav_file "balls/ball-lost.wav"
 
-let initialize_video () = (* {{{ *)
+let initialize_video should_reload_textures = (* {{{ *)
 
   let load_textures () =
     let s = load_bmp "balls/background.bmp" in
@@ -149,6 +149,14 @@ let initialize_video () = (* {{{ *)
     ()
 
 
+
+  and init_video_mode () =
+    let flags = (if the.fullscreen then [OPENGL; FULLSCREEN; HWPALETTE] else [OPENGL; HWPALETTE]) in
+    set_attribute DOUBLEBUFFER 1;
+
+    ignore( set_video_mode the.screen.width the.screen.height 0 flags );
+    Video.show_cursor (not the.fullscreen);
+
   and init_opengl () =
 
     glEnable gl_blend;
@@ -159,24 +167,25 @@ let initialize_video () = (* {{{ *)
     glEnable gl_alpha_test;
 
 
-  and init_video_mode () =
-    let flags = (if the.fullscreen then [OPENGL; FULLSCREEN; HWPALETTE] else [OPENGL; HWPALETTE]) in
-    set_attribute DOUBLEBUFFER 1;
-
-    ignore( set_video_mode the.screen.width the.screen.height 0 flags );
-    Video.show_cursor (not the.fullscreen);
-
   in
 
   init_video_mode ();
   init_opengl ();
-  load_textures ();
+  if should_reload_textures then begin
+  	load_textures ();
+  	f13#reload();
+	f21#reload();
+	f36#reload();
+	f48#reload();
+	scorefont#reload();
+  end;
+
   () (* }}} *)
 
 
 let toggle_fullscreen () =
   the.fullscreen <- not the.fullscreen;
-  initialize_video ()
+  initialize_video true
 
 
 let toggle_debug () =
@@ -209,7 +218,7 @@ let draw_ball state =
   glVertex2i (-1) (-1);
   glVertex2i ( 1) (-1);
   glVertex2i ( 1) ( 1);
-  glVertex2i (-1) (+1);
+  glVertex2i (-1) ( 1);
   glEnd ()
 
 
@@ -691,7 +700,7 @@ let rec process_events () =
         log "resize to %dx%d" r.w r.h;
         the.screen.width <- r.w;
         the.screen.height <- r.h;
-        initialize_video ();
+        initialize_video false;
     | NoEvent -> raise No_more_events
     | _ -> ()
   );
@@ -735,8 +744,10 @@ let main () =
   install_debug_logger ();
   log "press [D] to turn off debug messages";
 
-  initialize_video ();
+  initialize_audio ();
+  initialize_video true;
   (* restart_game (); *)
+  render_lerp 0;
   main_loop (get_ticks ()) 0
 
 

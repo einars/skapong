@@ -669,10 +669,10 @@ endif
 ALL_OCAMLCFLAGS := $(THREAD_FLAG) $(ANNOT_FLAG) $(OCAMLFLAGS) \
                    $(INCFLAGS) $(SPECIAL_OCAMLFLAGS)
 
-ifdef make_deps
-  -include $(MAKE_DEPS)
-  PRE_TARGETS :=
-endif
+#ifdef make_deps
+#  -include $(MAKE_DEPS)
+#  PRE_TARGETS :=
+#endif
 
 ###########################################################################
 # USER RULES

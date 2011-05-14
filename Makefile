@@ -8,13 +8,15 @@ GL_SOURCE  = $(LIBDIR)/glcaml_stub.c $(LIBDIR)/glcaml.mli $(LIBDIR)/glcaml.ml
 SOURCES = ${WIN_SOURCE} ${SDL_SOURCE} ${GL_SOURCE} ${FILES}
 RESULT  = skapong
 
+
 ifdef SYSTEMROOT
-	CLIBS   = SDL opengl32 gdi32
-	WIN32   = 1
-	LIBDIRS = /usr/lib/mingw-libs
-	TARGET  = native-code
-	POST    = mkwinapp/mkwinapp.exe skapong.exe
+LIBDIRS = /usr/lib/mingw-libs
+CLIBS   = SDL SDL_mixer opengl32 gdi32
+TARGET  = native-code
+POST    = mkwinapp/mkwinapp.exe skapong.exe
+
 else
+
 	CLIBS   = SDL SDL_mixer GL
 	TARGET  = debug-code
 	POST    =
@@ -25,6 +27,5 @@ all:$(TARGET)
 
 run:$(TARGET)
 	OCAMLRUNPARAM=b ./skapong
-
 
 -include OCamlMakefile

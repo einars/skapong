@@ -48,6 +48,8 @@ class bff_font file_name =
         log "  base: %d" our_base;
       end
 
+    method reload () =
+      we_are_initialized <- false
 
     method initialize () =
       if not we_are_initialized then
