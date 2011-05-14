@@ -41,6 +41,7 @@ type playerstate =
 
 type gamestate =
   { mutable ball:    dimension * dimension (* current position *)
+  ; mutable background_scroll: dimension * dimension
   ; mutable vector:  int * int
 
   ; mutable p1: playerstate
@@ -53,6 +54,7 @@ type gamestate =
 let gamestate_clean =
   { ball    = 0, 0
   ; vector  = 1, 1
+  ; background_scroll = 0, 0
 
   ; p1 = { pos = dimension_cm 350
          ; score = 0
@@ -429,6 +431,11 @@ let calc_next_state os advance_ms =
 
     let new_ball, new_direction = reflecting_thrust os.ball direction os.vector reflective_surfaces in
 
+
+    (* adjust background scroll *)
+    ns.background_scroll <- ns.background_scroll |+ new_ball |- os.ball;
+
+
     ns.vector <- new_direction;
     ns.ball <- new_ball;
 
@@ -447,7 +454,7 @@ let calc_next_state os advance_ms =
 
       ball_lost_sound#play ();
 
-      if ns.p1.score <> 15 && ns.p2.score <> 15
+      if ns.p1.score <> 9 && ns.p2.score <> 9
       then ns.state <- "stop"
       else ns.state <- "gameover";
     end;
@@ -508,8 +515,8 @@ let draw_scrolled_background state =
   let adjx = (float the.screen.width) /. 256.0
   and adjy = (float the.screen.height) /. 256.0 in
 
-  let offx = (x_of state.ball $ float) /. (float the.field.width) /. 2.71
-  and offy = (y_of state.ball $ float) /. (float the.field.height) /. 2.71 in
+  let offx = ( (x_of state.background_scroll) $ float) /. (float the.field.width) /. 2.71
+  and offy = ( (y_of state.background_scroll) $ float) /. (float the.field.height) /. 2.71 in
 
   glTexCoord2f offx offy;
   glVertex2i 0 0;
