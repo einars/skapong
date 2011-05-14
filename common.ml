@@ -148,4 +148,11 @@ let is_horizontal seg =
   let (_, y1), (_, y2) = seg in y1 = y2
 
 
-let log m  = kprintf (fun m -> try printf "%s\n%!" m with _ -> () ) m
+let default_log s = try printf "%s\n%!" s with _ -> ()
+
+let current_logger = ref default_log
+
+let install_logger l =
+  current_logger := l
+
+let log m  = kprintf !current_logger m

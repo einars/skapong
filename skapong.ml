@@ -9,6 +9,7 @@ open SDLGL
 open Glcaml
 
 open Common
+open Debug
 
 open Bff
 
@@ -87,8 +88,6 @@ let the =
   ; debug      = false
   }
 
-let ilog m = kprintf (fun m -> if the.debug then log "%s" m) m (* ignore log *)
-
 
 let reasonable_starting_angle () =
   let angle = Random.int 90 - 45 in
@@ -105,15 +104,6 @@ let restart_game () =
     the.game.state <- "play";
   )
 
-
-let gl_resize () =
-  glMatrixMode gl_projection;
-  glLoadIdentity ();
-  glOrtho 0.0 (float the.field.width) 0.0 (float the.field.height) 0.0 1.0;
-  glMatrixMode gl_modelview;
-  glLoadIdentity ();
-  glTranslatef 0.375 0.375 0.0;
-  ()
 
 
 
@@ -150,8 +140,6 @@ let initialize_video () = (* {{{ *)
 
     glAlphaFunc gl_greater 0.0;
     glEnable gl_alpha_test;
-
-    gl_resize ();
 
 
   and init_video_mode () =
@@ -491,9 +479,11 @@ let start_graphics_layer () =
   glMatrixMode gl_projection;
   glLoadIdentity ();
   glOrtho 0.0 (float the.field.width) 0.0 (float the.field.height) 0.0 1.0;
+
   glMatrixMode gl_modelview;
   glLoadIdentity ();
   glTranslatef 0.375 0.375 0.0;
+
   glDisable gl_blend;
   ()
 
@@ -501,17 +491,19 @@ let start_text_layer () =
   glMatrixMode gl_projection;
   glLoadIdentity ();
   glOrtho 0.0 (float the.screen.width) 0.0 (float the.screen.height) 0.0 1.0;
+
   glMatrixMode gl_modelview;
   glLoadIdentity ();
   glTranslatef 0.375 0.375 0.0;
+
   glEnable gl_blend;
   glBlendFunc gl_one gl_one_minus_src_alpha;
   ()
 
 let render_state state =
+  glLoadIdentity ();
   glClearColor 0.1 0.1 0.1 0.0;
   glClear gl_color_buffer_bit;
-  glLoadIdentity ();
 
   start_graphics_layer ();
 
@@ -525,13 +517,16 @@ let render_state state =
   draw_ball bx by;
 
 
+  (* ortho 800x600 *)
   start_text_layer ();
+
   glColor3f 0.1 0.1 0.1;
-  mainfont#pprint 30 10 "This is a skapong, bitch!";
+
+  (* get_debug_messages () $ mainfont#print_lines 30 10; *)
+
+  mainfont#print 30 30 "Rio, mans rio";
 
   swap_buffers ();
-
-  glFinish ();
 
   ()
 
@@ -601,10 +596,10 @@ let rec process_events () =
         Sdl.quit ();
         exit 0;
     | Resize r ->
-        ilog "resize to %dx%d" r.w r.h;
+        log "resize to %dx%d" r.w r.h;
         the.screen.width <- r.w;
         the.screen.height <- r.h;
-        gl_resize ();
+        initialize_video ();
     | NoEvent -> raise No_more_events
     | _ -> ()
   );
@@ -620,7 +615,6 @@ let rec main_loop last_time accumulator =
 
   let rec eat_physics accumulator =
     if accumulator >= period then begin
-      ilog "tick";
       do_tick period;
       eat_physics (accumulator - period)
     end else accumulator
@@ -633,7 +627,6 @@ let rec main_loop last_time accumulator =
 
   let accumulator = (accumulator + frame_time) $ eat_physics in
 
-  accumulator * 100 / period $ ilog "oompf %d";
   accumulator * 100 / period $ render_lerp;
   delay 5;
   main_loop time accumulator
@@ -644,6 +637,9 @@ let main () =
   Sdl.init [Sdl.VIDEO];
   Random.self_init ();
   set_caption "Skapong, the boring pong" "skapong";
+
+  (* install_debug_logger (); *)
+
   initialize_video ();
   restart_game ();
   main_loop (get_ticks ()) 0

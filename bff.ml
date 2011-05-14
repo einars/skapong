@@ -95,6 +95,7 @@ class bff_font file_name =
       (* glTexImage2D gl_texture_2d 0 gl_luminance our_size_x our_size_y 0 gl_luminance gl_unsigned_byte bytes; *)
       glTexImage2D gl_texture_2d 0 gl_alpha our_size_x our_size_y 0 gl_alpha gl_unsigned_byte bytes;
 
+      we_are_initialized_successfully <- true;
       ()
 
     method use () =
@@ -105,45 +106,56 @@ class bff_font file_name =
     method pprint (x:int) (y:int) (text:string) =
 
       self#use ();
-
       self#print x y text;
 
 
     method print x y text =
-      let len = String.length text in
+
+      if not we_are_initialized then self#texture();
+      if we_are_initialized_successfully then begin
+        let len = String.length text in
+        glBegin gl_quads;
+
+        let cur_x = ref x in
+
+        let row_pitch = our_size_x / our_cell_x
+        and col_factor = (float our_cell_x) /. (float our_size_x)
+        and row_factor = (float our_cell_y) /. (float our_size_y) in
+
+        for i = 0 to len - 1 do
+          let c = Char.code text.[i] in
+
+          let row = (c - our_base) / row_pitch
+          and col = (c - our_base) mod row_pitch in
+
+          let u = (float col) *. col_factor
+          and v = (float row) *. row_factor in
+
+          let u1 = u +. col_factor
+          and v1 = v +. row_factor in
+
+          glTexCoord2f u  v1; glVertex2i !cur_x                y;
+          glTexCoord2f u1 v1; glVertex2i (!cur_x + our_cell_x) y;
+          glTexCoord2f u1 v ; glVertex2i (!cur_x + our_cell_x) (y + our_cell_y);
+          glTexCoord2f u  v ; glVertex2i !cur_x                (y + our_cell_y);
+
+          cur_x := !cur_x + our_char_widths.(c)
+
+        done;
+
+        glEnd ();
+      end
 
 
-      glBegin gl_quads;
-
-      let cur_x = ref x in
-
-      let row_pitch = our_size_x / our_cell_x
-      and col_factor = (float our_cell_x) /. (float our_size_x)
-      and row_factor = (float our_cell_y) /. (float our_size_y) in
-
-      for i = 0 to len - 1 do
-        let c = Char.code text.[i] in
-
-        let row = (c - our_base) / row_pitch
-        and col = (c - our_base) mod row_pitch in
-
-        let u = (float col) *. col_factor
-        and v = (float row) *. row_factor in
-
-        let u1 = u +. col_factor
-        and v1 = v +. row_factor in
-
-        glTexCoord2f u  v1; glVertex2i !cur_x                y;
-        glTexCoord2f u1 v1; glVertex2i (!cur_x + our_cell_x) y;
-        glTexCoord2f u1 v ; glVertex2i (!cur_x + our_cell_x) (y + our_cell_y);
-        glTexCoord2f u  v ; glVertex2i !cur_x                (y + our_cell_y);
-
-        cur_x := !cur_x + our_char_widths.(c)
-
-      done;
-
-      glEnd ();
-
+    method print_lines x y lines =
+      let rec print_lines x y = function
+      | line :: rest ->
+        begin
+          self#print x y line;
+          print_lines x (y + our_size_x / our_cell_x) rest;
+        end
+      | _ -> ()
+      in print_lines x y lines;
   end
 
 
