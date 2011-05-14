@@ -8,6 +8,8 @@ open Event
 open SDLGL
 open Glcaml
 
+open Spaudio
+
 open Common
 open Debug
 
@@ -124,6 +126,11 @@ let f36 = new bff_font "balls/pt-sans-36.bff"
 let f48 = new bff_font "balls/pt-sans-48-bold.bff"
 let scorefont = new bff_font "balls/pt-sans-60-numbers.bff"
 
+let wall_reflection_sound   = new wav_file "balls/reflection-wall.wav"
+let paddle1_reflection_sound = new wav_file "balls/reflection-paddle-1.wav"
+let paddle2_reflection_sound = new wav_file "balls/reflection-paddle-2.wav"
+let ball_lost_sound = new wav_file "balls/ball-lost.wav"
+
 let initialize_video () = (* {{{ *)
 
   let load_textures () =
@@ -173,8 +180,7 @@ let toggle_fullscreen () =
 
 
 let toggle_debug () =
-  the.debug <- not the.debug;
-  log "debug %s" (if the.debug then "on" else "off")
+  the.debug <- not the.debug
 
 
 let draw_paddle x y is_computer =
@@ -259,10 +265,13 @@ let get_adjusted_reflection_angle wall pt =
 
 
 let audio_hit_wall () =
-  ()
+  wall_reflection_sound#play ()
 
-let audio_hit_paddle () =
-  ()
+let audio_hit_paddle1 () =
+  paddle1_reflection_sound#play ()
+
+let audio_hit_paddle2 () =
+  paddle2_reflection_sound#play ()
 
 let adj_angle new_angle vector =
     let length = 105 * (length_of vector) / 100
@@ -300,14 +309,19 @@ let rec reflecting_thrust ball_pos partial_movement full_movement surfaces =
               (string_of_vec full_movement)
               (string_of_vec partial_movement);
 
-            if is_vertical wall then begin
+            if name = "paddle-1" then
+              audio_hit_paddle1 ()
+            else if name = "paddle-2" then
+              audio_hit_paddle2 ()
+            else if name = "wall-u" || name = "wall-d" then
               audio_hit_wall ();
+
+            if is_vertical wall then begin
               log "bam!";
               let new_angle = get_adjusted_reflection_angle wall i in
               i |+ (ball_pos |+ partial_movement |- i $ adj_angle new_angle), (adj_angle new_angle full_movement)
             end
             else begin
-              audio_hit_paddle ();
               i |+ (ball_pos |+ partial_movement |- i $ reflect_y), (reflect_y full_movement)
             end
         )
@@ -398,10 +412,10 @@ let calc_next_state os advance_ms =
 
 
     let reflective_surfaces = [
-      "left-paddle", (paddle_padding + the.paddle.width, os.p1.pos - half the.paddle.height), (paddle_padding + the.paddle.width, os.p1.pos + half the.paddle.height);
-      "right-paddle", (the.field.width - the.paddle.width - paddle_padding, os.p2.pos - half the.paddle.height), (the.field.width - the.paddle.width - paddle_padding, os.p2.pos + half the.paddle.height);
-      "down", (0, 0), (the.field.width, 0);
-      "up", (0, the.field.height), (the.field.width, the.field.height);
+      "paddle-1", (paddle_padding + the.paddle.width, os.p1.pos - half the.paddle.height), (paddle_padding + the.paddle.width, os.p1.pos + half the.paddle.height);
+      "paddle-2", (the.field.width - the.paddle.width - paddle_padding, os.p2.pos - half the.paddle.height), (the.field.width - the.paddle.width - paddle_padding, os.p2.pos + half the.paddle.height);
+      "wall-d", (0, 0), (the.field.width, 0);
+      "wall-u", (0, the.field.height), (the.field.width, the.field.height);
     ] in
 
     let new_ball, new_direction = reflecting_thrust os.ball direction os.vector reflective_surfaces in
@@ -421,6 +435,8 @@ let calc_next_state os advance_ms =
       end;
       log "[space] to start";
       ns.ball <- half the.field.width, half the.field.height;
+
+      ball_lost_sound#play ();
 
       if ns.p1.score <> 15 && ns.p2.score <> 15
       then ns.state <- "stop"
@@ -710,7 +726,9 @@ let rec main_loop last_time accumulator =
 
 let main () =
   (* test_thrust (); exit 9; *)
-  Sdl.init [Sdl.VIDEO];
+  Sdl.init [Sdl.VIDEO; Sdl.AUDIO];
+
+
   Random.self_init ();
   set_caption "Skapong, the boring pong" "skapong";
 
