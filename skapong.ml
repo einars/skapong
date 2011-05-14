@@ -116,7 +116,7 @@ let reasonable_starting_angle state =
 let start_game () =
   if the.game.state = "gameover" || the.game.state = "stop" then (
     the.game.ball  <- half the.field.width, half the.field.height;
-    the.game.vector <- make_vector (reasonable_starting_angle the.game) (dimension_cm ( 300 + 25 * (the.game.p1.score + the.game.p2.score)) );
+    the.game.vector <- make_vector (reasonable_starting_angle the.game) (dimension_cm ( 300 + 15 * (the.game.p1.score + the.game.p2.score)) );
     if the.game.state = "gameover" then begin
       the.game.p1.score <- 0;
       the.game.p2.score <- 0;
@@ -164,7 +164,8 @@ let initialize_video should_reload_textures = (* {{{ *)
     set_attribute DOUBLEBUFFER 1;
 
     ignore( set_video_mode the.screen.width the.screen.height 0 flags );
-    Video.show_cursor (not the.fullscreen);
+    (* Windows has issues when enabled: alt-tab captures the mouse and won't release *)
+    (* Video.show_cursor (not the.fullscreen); *)
 
   and init_opengl () =
 
@@ -455,7 +456,7 @@ let calc_next_state os advance_ms =
         ns.last_winner <- 2;
       end else begin
         log "out of bounds, player 1 wins";
-        ns.p2.score <- ns.p2.score + 1;
+        ns.p1.score <- ns.p1.score + 1;
         ns.last_winner <- 1;
       end;
       log "[space] to start";
