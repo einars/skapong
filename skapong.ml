@@ -47,6 +47,8 @@ type gamestate =
   ; mutable p1: playerstate
   ; mutable p2: playerstate
 
+  ; mutable last_winner: int (* 0 (game start) / 1 / 2 *)
+
   ; mutable state:   string (* play / stop / gameover *)
   }
 
@@ -54,6 +56,7 @@ type gamestate =
 let gamestate_clean =
   { ball    = 0, 0
   ; vector  = 1, 1
+  ; last_winner = 0
   ; background_scroll = 0, 0
 
   ; p1 = { pos = dimension_cm 350
@@ -105,15 +108,19 @@ let the =
   }
 
 
-let reasonable_starting_angle () =
+let reasonable_starting_angle state =
   let angle = Random.int 90 - 45 in
-  let a = if Random.int 2 = 1 then 180 + angle else angle in
+  let a = if state.last_winner = 2 then 180 + angle else angle in
   if a < 0 then a + 360 else a
 
 let start_game () =
   if the.game.state = "gameover" || the.game.state = "stop" then (
     the.game.ball  <- half the.field.width, half the.field.height;
-    the.game.vector <- make_vector (reasonable_starting_angle ()) (dimension_m 3);
+    the.game.vector <- make_vector (reasonable_starting_angle the.game) (dimension_cm ( 300 + 25 * (the.game.p1.score + the.game.p2.score)) );
+    if the.game.state = "gameover" then begin
+      the.game.p1.score <- 0;
+      the.game.p2.score <- 0;
+    end;
     the.game.state <- "play";
   )
 
@@ -445,14 +452,17 @@ let calc_next_state os advance_ms =
       if nx <= 0 then begin
         log "out of bounds, player 2 wins";
         ns.p2.score <- ns.p2.score + 1;
+        ns.last_winner <- 2;
       end else begin
         log "out of bounds, player 1 wins";
         ns.p2.score <- ns.p2.score + 1;
+        ns.last_winner <- 1;
       end;
       log "[space] to start";
       ns.ball <- half the.field.width, half the.field.height;
 
       ball_lost_sound#play ();
+
 
       if ns.p1.score <> 9 && ns.p2.score <> 9
       then ns.state <- "stop"
