@@ -42,12 +42,10 @@ class bff_font file_name =
       if not we_are_initialized then
         log "  not initialized yet"
       else begin
-        log "  size_x: %d" our_size_x;
-        log "  size_y: %d" our_size_y;
-        log "  cell_x: %d" our_cell_x;
-        log "  cell_y: %d" our_cell_y;
-        log "  bpp:    %d" our_bpp;
-        log "  base:   %d" our_base;
+        log "  size: %dx%d" our_size_x our_size_y;
+        log "  cell: %dx%d" our_cell_x our_cell_y;
+        log "  bpp:  %d" our_bpp;
+        log "  base: %d" our_base;
       end
 
 
@@ -152,7 +150,7 @@ class bff_font file_name =
       | line :: rest ->
         begin
           self#print x y line;
-          print_lines x (y + our_size_x / our_cell_x) rest;
+          print_lines x (y - our_size_x / our_cell_x) rest;
         end
       | _ -> ()
       in print_lines x y lines;

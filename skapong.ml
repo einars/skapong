@@ -85,7 +85,7 @@ let the =
   ; states     = Hashtbl.create 4
   ; hz         = 40
   ; fullscreen = false
-  ; debug      = false
+  ; debug      = true
   }
 
 
@@ -125,7 +125,7 @@ let initialize_video () = (* {{{ *)
 
     (* 2d texture, level of detail 0 (normal), 3 components (red, green, blue), x size from image, y size from image,
       border 0 (normal), rgb color data, unsigned byte data, and finally the data itself. *)
-    log "Loaded %d x %d" (surface_width s) (surface_height s);
+    log "Loaded background %d x %d" (surface_width s) (surface_height s);
     glTexImage2D gl_texture_2d 0 3 (surface_width s) (surface_height s) 0 gl_rgb gl_unsigned_byte (surface_pixels s);
 
     mainfont#texture ();
@@ -145,8 +145,6 @@ let initialize_video () = (* {{{ *)
   and init_video_mode () =
     let flags = (if the.fullscreen then [OPENGL; FULLSCREEN; HWPALETTE] else [OPENGL; HWPALETTE]) in
     set_attribute DOUBLEBUFFER 1;
-    set_attribute MULTISAMPLEBUFFERS 1;
-    set_attribute MULTISAMPLESAMPLES 2;
 
     ignore( set_video_mode the.screen.width the.screen.height 0 flags );
     (* Video.show_cursor the.fullscreen; *)
@@ -155,9 +153,7 @@ let initialize_video () = (* {{{ *)
 
   init_video_mode ();
   init_opengl ();
-  log "loading textures";
   load_textures ();
-  log "textures loaded";
   () (* }}} *)
 
 
@@ -396,7 +392,8 @@ let calc_next_state os advance_ms =
     let nx, _ = new_ball in
     if nx >= the.field.width || nx <= 0
     then begin
-      (* ball out of bounds, break game *)
+      log "%s" ("out of bounds, " ^ (if nx <= 0 then "player 2" else "player 1") ^ " wins");
+      log "[space] to restart";
       ns.ball <- half the.field.width, half the.field.height;
       ns.state <- "stop";
     end;
@@ -520,11 +517,14 @@ let render_state state =
   (* ortho 800x600 *)
   start_text_layer ();
 
-  glColor3f 0.1 0.1 0.1;
+  glColor3f 0.5 0.5 0.5;
 
-  (* get_debug_messages () $ mainfont#print_lines 30 10; *)
+  if the.debug then begin
+    mainfont#use ();
+    let messages = get_debug_messages () in
+    mainfont#print_lines 30 ( 16 * List.length messages) messages;
+  end;
 
-  mainfont#print 30 30 "Rio, mans rio";
 
   swap_buffers ();
 
@@ -548,11 +548,20 @@ let rec paddle_state statename newstate =
 
 let set_computer_p1 () =
   the.game.p1_is_computer <- not the.game.p1_is_computer;
+  if the.game.p1_is_computer then
+    log "P1 -> computer"
+  else
+    log "P1 -> human";
+
   the.game.state <- "play"
 
 
 let set_computer_p2 () =
   the.game.p2_is_computer <- not the.game.p2_is_computer;
+  if the.game.p2_is_computer then
+    log "P2 -> computer"
+  else
+    log "P2 -> human";
   the.game.state <- "play"
 
 
@@ -638,7 +647,8 @@ let main () =
   Random.self_init ();
   set_caption "Skapong, the boring pong" "skapong";
 
-  (* install_debug_logger (); *)
+  install_debug_logger ();
+  log "press [D] to turn off debug messages";
 
   initialize_video ();
   restart_game ();
