@@ -21,6 +21,13 @@ To build you'll need OCaml (obviously) and my fork of glcaml:
     make
     ./skapong
 
-Background picture of the clouds - a desaturized image by Skyblue2u of
-colourlovers.com,
-http://www.colourlovers.com/pattern/101050/powdered_sugar_cloud
+
+
+Background picture of the clouds - a desaturized image by Skyblue2u,
+    http://www.colourlovers.com/pattern/101050/powdered_sugar_cloud
+
+BFF fonts made by Codehead's bitmap font generator,
+    http://www.codehead.co.uk/cbfg/
+
+Font: PT Sans by Paratype,
+    http://www.fontsquirrel.com/fonts/PT-Sans

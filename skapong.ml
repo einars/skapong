@@ -10,6 +10,8 @@ open Glcaml
 
 open Common
 
+open Bff
+
 
 (* all size measurements are in millimeters *)
 (* meters/centimeters -> millimeters *)
@@ -85,7 +87,6 @@ let the =
   ; debug      = false
   }
 
-let log m  = kprintf (fun m -> try printf "%s\n%!" m with _ -> () ) m
 let ilog m = kprintf (fun m -> if the.debug then log "%s" m) m (* ignore log *)
 
 
@@ -118,6 +119,9 @@ let gl_resize () =
 
 let texture = Array.make 1 0
 
+(* let mainfont = new bff_font "balls/pt-sans-caption.bff" *)
+let mainfont = new bff_font "balls/pt-sans-13.bff"
+
 let initialize_video () = (* {{{ *)
 
 
@@ -132,7 +136,10 @@ let initialize_video () = (* {{{ *)
     (* 2d texture, level of detail 0 (normal), 3 components (red, green, blue), x size from image, y size from image,
       border 0 (normal), rgb color data, unsigned byte data, and finally the data itself. *)
     log "Loaded %d x %d" (surface_width s) (surface_height s);
-    glTexImage2D gl_texture_2d 0 3 (surface_width s) (surface_height s) 0 gl_rgb gl_unsigned_byte (surface_pixels s)
+    glTexImage2D gl_texture_2d 0 3 (surface_width s) (surface_height s) 0 gl_rgb gl_unsigned_byte (surface_pixels s);
+
+    mainfont#texture ();
+    ()
 
 
   and init_opengl () =
@@ -160,7 +167,9 @@ let initialize_video () = (* {{{ *)
 
   init_video_mode ();
   init_opengl ();
+  log "loading textures";
   load_textures ();
+  log "textures loaded";
   () (* }}} *)
 
 
@@ -175,6 +184,7 @@ let toggle_debug () =
 
 
 let draw_paddle x y is_computer =
+  glDisable gl_texture_2d;
   let hh = half the.paddle.height
   and ww = half the.paddle.width
   in
@@ -240,6 +250,7 @@ let intersection_of seg1 seg2 =
             , y1 +. ua *. (y2 -. y1) $ int_of_float)
     end else None
 
+
 let get_adjusted_reflection_angle wall pt =
   (* wall guaranteed to be vertical, it is a paddle *)
   (* returns 0..50 (0 = go directly back, 50 = max reflection *)
@@ -249,6 +260,7 @@ let get_adjusted_reflection_angle wall pt =
   let coeff = 100 * (wy2 - by) / (wy2 - wy1) in
   log "coef %d" coeff;
   if coeff > 50 then 50 - (100 - coeff) else 50 - coeff
+
 
 let adj_angle new_angle vector =
     let length = 105 * (length_of vector) / 100
@@ -442,18 +454,13 @@ let do_tick advance_ms =
 
 
 
+let draw_scrolled_background state =
 
+  glBindTexture gl_texture_2d texture.(0);
 
-let render_state state =
-  glClearColor 0.1 0.1 0.1 0.0;
-
-  glClear gl_color_buffer_bit;
-
-  glLoadIdentity ();
-
-  (* draw background *)
   glEnable gl_texture_2d;
 
+  (* draw background *)
   glColor3f 1.0 1.0 1.0;
 
   glBegin gl_quads;
@@ -477,8 +484,38 @@ let render_state state =
   glTexCoord2f offx (adjy +. offy);
   glVertex2i 0 the.field.height;
 
-  glEnd ();
-  glDisable gl_texture_2d;
+  glEnd ()
+
+
+let start_graphics_layer () =
+  glMatrixMode gl_projection;
+  glLoadIdentity ();
+  glOrtho 0.0 (float the.field.width) 0.0 (float the.field.height) 0.0 1.0;
+  glMatrixMode gl_modelview;
+  glLoadIdentity ();
+  glTranslatef 0.375 0.375 0.0;
+  glDisable gl_blend;
+  ()
+
+let start_text_layer () =
+  glMatrixMode gl_projection;
+  glLoadIdentity ();
+  glOrtho 0.0 (float the.screen.width) 0.0 (float the.screen.height) 0.0 1.0;
+  glMatrixMode gl_modelview;
+  glLoadIdentity ();
+  glTranslatef 0.375 0.375 0.0;
+  glEnable gl_blend;
+  glBlendFunc gl_one gl_one_minus_src_alpha;
+  ()
+
+let render_state state =
+  glClearColor 0.1 0.1 0.1 0.0;
+  glClear gl_color_buffer_bit;
+  glLoadIdentity ();
+
+  start_graphics_layer ();
+
+  draw_scrolled_background state;
 
   draw_paddle paddle_padding state.p1_pos state.p1_is_computer;
   draw_paddle (the.field.width - paddle_padding) state.p2_pos state.p2_is_computer;
@@ -486,6 +523,11 @@ let render_state state =
   let bx, by = state.ball
   in
   draw_ball bx by;
+
+
+  start_text_layer ();
+  glColor3f 0.1 0.1 0.1;
+  mainfont#pprint 30 10 "This is a skapong, bitch!";
 
   swap_buffers ();
 

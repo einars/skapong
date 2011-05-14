@@ -1,4 +1,4 @@
-FILES  = checked.ml common.ml skapong.ml
+FILES  = checked.ml common.ml bff.ml skapong.ml
 LIBDIR = lib
 LIBS   = graphics unix bigarray
 

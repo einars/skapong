@@ -1,6 +1,10 @@
 open Printf
 open Checked
 
+(* for array_of_file *)
+open Unix
+open Bigarray
+
 let ($) a b = b a
 
 type dimension = int
@@ -10,6 +14,19 @@ let dimension_mm mm = mm * 10
 let dimension_cm cm = cm * 10 $ dimension_mm
 
 let dimension_m m = m * 1000 $ dimension_mm
+
+
+
+
+
+let array_of_file file_name =
+  let file_size = (stat file_name).st_size in
+  let fd = openfile file_name [O_RDONLY] 0 in
+  let contents = Array1.map_file fd int8_unsigned c_layout false file_size in
+  Unix.close fd;
+  contents
+
+
 
 
 
@@ -130,3 +147,5 @@ let is_vertical seg =
 let is_horizontal seg =
   let (_, y1), (_, y2) = seg in y1 = y2
 
+
+let log m  = kprintf (fun m -> try printf "%s\n%!" m with _ -> () ) m
