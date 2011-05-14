@@ -10,6 +10,7 @@ open Glcaml
 
 open Common
 open Debug
+open Checked
 
 open Bff
 
@@ -48,7 +49,7 @@ let gamestate_clean =
          ; move = "none"
          ; is_computer = false
          }
-  ; p2 = { pos = 0
+  ; p2 = { pos = dimension_cm 350
          ; score = 0
          ; move = "none"
          ; is_computer = true
@@ -88,7 +89,7 @@ let the =
   ; states     = Hashtbl.create 4
   ; hz         = 40
   ; fullscreen = false
-  ; debug      = true
+  ; debug      = false
   }
 
 
@@ -97,13 +98,10 @@ let reasonable_starting_angle () =
   let a = if Random.int 2 = 1 then 180 + angle else angle in
   if a < 0 then a + 360 else a
 
-let restart_game () =
+let start_game () =
   if the.game.state = "stop" then (
     the.game.ball  <- half the.field.width, half the.field.height;
-    if the.debug
-    then the.game.vector <- make_vector 0  (dimension_m 4)
-    else the.game.vector <- make_vector (reasonable_starting_angle ()) (dimension_m 3);
-
+    the.game.vector <- make_vector (reasonable_starting_angle ()) (dimension_m 3);
     the.game.state <- "play";
   )
 
@@ -112,11 +110,13 @@ let restart_game () =
 
 let texture = Array.make 1 0
 
-(* let mainfont = new bff_font "balls/pt-sans-caption.bff" *)
-let mainfont = new bff_font "balls/pt-sans-13.bff"
+let f13 = new bff_font "balls/pt-sans-13.bff"
+let f21 = new bff_font "balls/pt-sans-21.bff"
+let f36 = new bff_font "balls/pt-sans-36.bff"
+let f48 = new bff_font "balls/pt-sans-48-bold.bff"
+let scorefont = new bff_font "balls/pt-sans-60-numbers.bff"
 
 let initialize_video () = (* {{{ *)
-
 
   let load_textures () =
     let s = load_bmp "balls/background.bmp" in
@@ -131,7 +131,6 @@ let initialize_video () = (* {{{ *)
     log "Loaded background %d x %d" (surface_width s) (surface_height s);
     glTexImage2D gl_texture_2d 0 3 (surface_width s) (surface_height s) 0 gl_rgb gl_unsigned_byte (surface_pixels s);
 
-    mainfont#texture ();
     ()
 
 
@@ -187,14 +186,16 @@ let draw_paddle x y is_computer =
   glEnd ()
 
 
-let draw_ball x y =
-  let ball_size = dimension_cm 5 in
+let draw_ball state =
+  let ball_size = dimension_cm 5 $ float in
   glColor3f 0.3 0.3 0.5;
+  glTranslatef (x_of state.ball $ float) (y_of state.ball $ float) 0.0;
+  glScalef ball_size ball_size ball_size;
   glBegin gl_quads;
-  glVertex2i (x - ball_size) (y - ball_size);
-  glVertex2i (x + ball_size) (y - ball_size);
-  glVertex2i (x + ball_size) (y + ball_size);
-  glVertex2i (x - ball_size) (y + ball_size);
+  glVertex2i (-1) (-1);
+  glVertex2i ( 1) (-1);
+  glVertex2i ( 1) ( 1);
+  glVertex2i (-1) (+1);
   glEnd ()
 
 
@@ -241,19 +242,25 @@ let intersection_of seg1 seg2 =
 let get_adjusted_reflection_angle wall pt =
   (* wall guaranteed to be vertical, it is a paddle *)
   (* returns 0..50 (0 = go directly back, 50 = max reflection *)
-  (* TK: just drop a random here *)
+  (* TK: just drop a random here? *)
   let _, by = pt
   and (_, wy1), (_, wy2) = wall in
   let coeff = 100 * (wy2 - by) / (wy2 - wy1) in
-  log "coef %d" coeff;
+  (* log "coef %d" coeff; *)
   if coeff > 50 then 50 - (100 - coeff) else 50 - coeff
 
+
+let audio_hit_wall () =
+  ()
+
+let audio_hit_paddle () =
+  ()
 
 let adj_angle new_angle vector =
     let length = 105 * (length_of vector) / 100
     and cur_angle = angle_of vector in
 
-    log "cur_angle of %s: %d -> %d" (string_of_vec vector) cur_angle new_angle;
+    (* log "cur_angle of %s: %d -> %d" (string_of_vec vector) cur_angle new_angle; *)
 
     make_vector
         (if cur_angle > 0 && cur_angle <= 90 then 180 - new_angle
@@ -261,8 +268,6 @@ let adj_angle new_angle vector =
         else if cur_angle > 180 && cur_angle <= 270 then 360 - new_angle
         else 180 + new_angle)
         length
-
-
 
 (*
  full_movement: movement vector in 1s
@@ -288,11 +293,15 @@ let rec reflecting_thrust ball_pos partial_movement full_movement surfaces =
               (string_of_vec partial_movement);
 
             if is_vertical wall then begin
+              audio_hit_wall ();
               log "bam!";
               let new_angle = get_adjusted_reflection_angle wall i in
               i |+ (ball_pos |+ partial_movement |- i $ adj_angle new_angle), (adj_angle new_angle full_movement)
             end
-            else i |+ (ball_pos |+ partial_movement |- i $ reflect_y), (reflect_y full_movement)
+            else begin
+              audio_hit_paddle ();
+              i |+ (ball_pos |+ partial_movement |- i $ reflect_y), (reflect_y full_movement)
+            end
         )
       | _ -> ball_pos |+ partial_movement, full_movement
 
@@ -395,8 +404,14 @@ let calc_next_state os advance_ms =
     let nx, _ = new_ball in
     if nx >= the.field.width || nx <= 0
     then begin
-      log "%s" ("out of bounds, " ^ (if nx <= 0 then "player 2" else "player 1") ^ " wins");
-      log "[space] to restart";
+      if nx <= 0 then begin
+        log "out of bounds, player 2 wins";
+        ns.p2.score <- ns.p2.score + 1;
+      end else begin
+        log "out of bounds, player 1 wins";
+        ns.p2.score <- ns.p2.score + 1;
+      end;
+      log "[space] to start";
       ns.ball <- half the.field.width, half the.field.height;
       ns.state <- "stop";
     end;
@@ -500,6 +515,29 @@ let start_text_layer () =
   glBlendFunc gl_one gl_one_minus_src_alpha;
   ()
 
+
+let draw_score state =
+  glColor3f 0.2 0.4 0.4;
+  sprintf "%d" state.p1.score $ scorefont#print 200 530;
+  sprintf "%d" state.p2.score $ scorefont#print 600 530;
+  ()
+
+let draw_instructions state =
+
+  if state.p1.score = 15 || state.p2.score = 15 || (state.p1.score = 0 && state.p2.score = 0) then begin
+    f48#print 200 430 "SKAPONG";
+    "Press SPACE to start a new game." $ f36#print 200 400;
+    [ " Keys:"
+    ; "  A, Z: first player movement,"
+    ; "  UP, DOWN: second player movement,"
+    ; "  1: switch player/computer mode for the first player,"
+    ; "  2: switch player/computer mode for the second player,"
+    ; "  D: debug messages on/off,"
+    ; "  ESC: stop / quit."] $ f21#print_lines 200 360;
+  end else begin
+    "Press SPACE to start a game." $ f36#print 200 400;
+  end
+
 let render_state state =
   glLoadIdentity ();
   glClearColor 0.1 0.1 0.1 0.0;
@@ -512,9 +550,7 @@ let render_state state =
   draw_paddle paddle_padding state.p1.pos state.p1.is_computer;
   draw_paddle (the.field.width - paddle_padding) state.p2.pos state.p2.is_computer;
 
-  let bx, by = state.ball
-  in
-  draw_ball bx by;
+  if state.state = "play" then draw_ball state;
 
 
   (* ortho 800x600 *)
@@ -523,11 +559,13 @@ let render_state state =
   glColor3f 0.5 0.5 0.5;
 
   if the.debug then begin
-    mainfont#use ();
     let messages = get_debug_messages () in
-    mainfont#print_lines 30 ( 16 * List.length messages) messages;
+    f13#print_lines 30 ( 16 * List.length messages) messages;
   end;
 
+  draw_score state;
+
+  if state.state = "stop" then draw_instructions state;
 
   swap_buffers ();
 
@@ -576,16 +614,27 @@ let rec process_events () =
     | Key k -> (
             match k.sym with
             | K_ESCAPE ->
-                Sdl.quit ();
-                exit 0;
+                if k.keystate = PRESSED then
+                if the.game.state = "play" then
+                  the.game.state <- "stop"
+                else begin
+                  Sdl.quit ();
+                  exit 0;
+                end;
             | K_RETURN ->
-                if (k.keystate = PRESSED && List.exists (fun x -> x = KMOD_LALT) k.modifiers) then toggle_fullscreen ();
+                if k.keystate = PRESSED then begin
+                  if List.exists (fun x -> x = KMOD_LALT) k.modifiers
+                  then toggle_fullscreen ()
+                  else start_game ();
+                end;
             | K_1 ->
                 if k.keystate = PRESSED then set_computer_p1 ();
             | K_2 ->
                 if k.keystate = PRESSED then set_computer_p2 ();
             | K_SPACE ->
-                if k.keystate = PRESSED then restart_game ();
+                if k.keystate = PRESSED then start_game ();
+            | K_BACKQUOTE
+            | K_BACKSLASH
             | K_D ->
                 if k.keystate = PRESSED then toggle_debug ();
             | K_A ->
@@ -603,7 +652,7 @@ let rec process_events () =
             | _ -> ()
     )
     | Button b ->
-        restart_game ();
+        start_game ();
     | Quit ->
         Sdl.quit ();
         exit 0;
@@ -654,7 +703,7 @@ let main () =
   log "press [D] to turn off debug messages";
 
   initialize_video ();
-  restart_game ();
+  (* restart_game (); *)
   main_loop (get_ticks ()) 0
 
 

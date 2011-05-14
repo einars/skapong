@@ -49,7 +49,7 @@ class bff_font file_name =
       end
 
 
-    method texture () =
+    method initialize () =
       if not we_are_initialized then
       let c = array_of_file file_name in
       we_are_initialized <- true;
@@ -96,21 +96,14 @@ class bff_font file_name =
       we_are_initialized_successfully <- true;
       ()
 
-    method use () =
-      glEnable gl_texture_2d;
-      (* glBlendFunc gl_src_alpha gl_src_alpha; *)
-      glBindTexture gl_texture_2d our_texture.(0)
-
-    method pprint (x:int) (y:int) (text:string) =
-
-      self#use ();
-      self#print x y text;
-
-
     method print x y text =
 
-      if not we_are_initialized then self#texture();
+      if not we_are_initialized then self#initialize();
       if we_are_initialized_successfully then begin
+
+        glEnable gl_texture_2d;
+        glBindTexture gl_texture_2d our_texture.(0);
+
         let len = String.length text in
         glBegin gl_quads;
 
@@ -150,7 +143,7 @@ class bff_font file_name =
       | line :: rest ->
         begin
           self#print x y line;
-          print_lines x (y - our_size_x / our_cell_x) rest;
+          print_lines x (y - our_cell_y) rest;
         end
       | _ -> ()
       in print_lines x y lines;
