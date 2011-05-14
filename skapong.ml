@@ -21,21 +21,21 @@ let paddle_padding = dimension_cm 15
 (* paddle movement distance in 1s *)
 let paddle_speed = dimension_cm 400
 
+type playerstate =
+  { mutable pos: dimension (* vertical center *)
+  ; mutable score: int
+  ; mutable move: string (* none / up / down *)
+  ; mutable is_computer: bool
+  }
+
 type gamestate =
   { mutable ball:    dimension * dimension (* current position *)
   ; mutable vector:  int * int
 
-  ; mutable p1_pos:  dimension (* vertical center of the first paddle *)
-  ; mutable p2_pos:  dimension (* vertical center of the second paddle *)
+  ; mutable p1: playerstate
+  ; mutable p2: playerstate
 
   ; mutable state:   string (* play / stop *)
-
-  ; mutable p1_move: string (* none/up/down *)
-  ; mutable p2_move: string (* none/up/down *)
-
-  ; mutable p1_is_computer: bool
-  ; mutable p2_is_computer: bool
-
   }
 
 
@@ -43,14 +43,17 @@ let gamestate_clean =
   { ball    = 0, 0
   ; vector  = 1, 1
 
-  ; p1_pos  = dimension_cm 350
-  ; p2_pos  = 0
+  ; p1 = { pos = dimension_cm 350
+         ; score = 0
+         ; move = "none"
+         ; is_computer = false
+         }
+  ; p2 = { pos = 0
+         ; score = 0
+         ; move = "none"
+         ; is_computer = true
+         }
   ; state   = "stop"
-  ; p1_move = "none"
-  ; p2_move = "none"
-  ; p1_is_computer = false
-  ; p2_is_computer = true
-
   }
 
 
@@ -306,14 +309,14 @@ let nonnull x = if x = 0 then 1 else x
 
 
 
-let lerp_gamestate percentage p1 p2 =
-  let ns = { p1 with state = p1.state } (* new state *)
+let lerp_gamestate percentage src dst =
+  let ns = { src with state = src.state } (* new state *)
 
   in
 
-  ns.p1_pos <- lerp_int percentage p1.p1_pos p2.p1_pos;
-  ns.p2_pos <- lerp_int percentage p1.p2_pos p2.p2_pos;
-  ns.ball   <- lerp_pt percentage p1.ball p2.ball;
+  ns.p1.pos <- lerp_int percentage src.p1.pos dst.p1.pos;
+  ns.p2.pos <- lerp_int percentage src.p2.pos dst.p2.pos;
+  ns.ball   <- lerp_pt percentage src.ball dst.ball;
 
   ns
 
@@ -339,47 +342,47 @@ let calc_next_state os advance_ms =
     let bx, by = os.ball and dx, dy = direction in
 
     (* a simple AI logic *)
-    if ns.p1_is_computer then (
+    if ns.p1.is_computer then (
       let hit_y =
         by - dy * bx / (nonnull dx) in
 
-      let move_up = os.p1_pos + third the.paddle.height < hit_y
-      and move_dn = os.p1_pos - third the.paddle.height > hit_y in
-      os.p1_move <- "none";
-      if move_up && hit_y < 2 * the.field.height then os.p1_move <- "up";
-      if move_dn && hit_y > - 2 * the.field.height then os.p1_move <- "down";
+      let move_up = os.p1.pos + third the.paddle.height < hit_y
+      and move_dn = os.p1.pos - third the.paddle.height > hit_y in
+      os.p1.move <- "none";
+      if move_up && hit_y < 2 * the.field.height then os.p1.move <- "up";
+      if move_dn && hit_y > - 2 * the.field.height then os.p1.move <- "down";
     );
 
 
-    if ns.p2_is_computer then (
+    if ns.p2.is_computer then (
       let hit_y =
         by + dy * (the.field.width - bx) / (nonnull dx) in
 
-      let move_up = os.p2_pos + third the.paddle.height < hit_y
-      and move_dn = os.p2_pos - third the.paddle.height > hit_y in
-      os.p2_move <- "none";
-      if move_up && hit_y < 2 * the.field.height then os.p2_move <- "up";
-      if move_dn && hit_y > - 2 * the.field.height then os.p2_move <- "down";
+      let move_up = os.p2.pos + third the.paddle.height < hit_y
+      and move_dn = os.p2.pos - third the.paddle.height > hit_y in
+      os.p2.move <- "none";
+      if move_up && hit_y < 2 * the.field.height then os.p2.move <- "up";
+      if move_dn && hit_y > - 2 * the.field.height then os.p2.move <- "down";
     );
 
 
 
-    if os.p1_move = "up"        then ns.p1_pos <- os.p1_pos + paddle_inc
-    else if os.p1_move = "down" then ns.p1_pos <- os.p1_pos - paddle_inc;
+    if os.p1.move = "up"        then ns.p1.pos <- os.p1.pos + paddle_inc
+    else if os.p1.move = "down" then ns.p1.pos <- os.p1.pos - paddle_inc;
 
-    if os.p2_move = "up"        then ns.p2_pos <- os.p2_pos + paddle_inc
-    else if os.p2_move = "down" then ns.p2_pos <- os.p2_pos - paddle_inc;
+    if os.p2.move = "up"        then ns.p2.pos <- os.p2.pos + paddle_inc
+    else if os.p2.move = "down" then ns.p2.pos <- os.p2.pos - paddle_inc;
 
     let paddle_clip_lo = half the.paddle.height
     and paddle_clip_hi = the.field.height - half the.paddle.height
     in
-    ns.p1_pos <- clamp ns.p1_pos paddle_clip_lo paddle_clip_hi;
-    ns.p2_pos <- clamp ns.p2_pos paddle_clip_lo paddle_clip_hi;
+    ns.p1.pos <- clamp ns.p1.pos paddle_clip_lo paddle_clip_hi;
+    ns.p2.pos <- clamp ns.p2.pos paddle_clip_lo paddle_clip_hi;
 
 
     let reflective_surfaces = [
-      "left-paddle", (paddle_padding + the.paddle.width, os.p1_pos - half the.paddle.height), (paddle_padding + the.paddle.width, os.p1_pos + half the.paddle.height);
-      "right-paddle", (the.field.width - the.paddle.width - paddle_padding, os.p2_pos - half the.paddle.height), (the.field.width - the.paddle.width - paddle_padding, os.p2_pos + half the.paddle.height);
+      "left-paddle", (paddle_padding + the.paddle.width, os.p1.pos - half the.paddle.height), (paddle_padding + the.paddle.width, os.p1.pos + half the.paddle.height);
+      "right-paddle", (the.field.width - the.paddle.width - paddle_padding, os.p2.pos - half the.paddle.height), (the.field.width - the.paddle.width - paddle_padding, os.p2.pos + half the.paddle.height);
       "down", (0, 0), (the.field.width, 0);
       "up", (0, the.field.height), (the.field.width, the.field.height);
     ] in
@@ -409,27 +412,27 @@ let do_tick advance_ms =
   the.game_prev <- the.game;
 
   if the.game.state = "play" then (
-    let p1_up = state "1U" = "T"
-    and p1_dn = state "1D" = "T"
-    and p2_up = state "2U" = "T"
-    and p2_dn = state "2D" = "T"
-    and p1_last = state "1LAST"
-    and p2_last = state "2LAST"
+    let is_moving_up_1 = state "1U" = "T"
+    and is_moving_dn_1 = state "1D" = "T"
+    and is_moving_up_2 = state "2U" = "T"
+    and is_moving_dn_2 = state "2D" = "T"
+    and last_1 = state "1LAST"
+    and last_2 = state "2LAST"
 
     in
 
-    the.game.p1_move <- "none";
-    the.game.p2_move <- "none";
+    the.game.p1.move <- "none";
+    the.game.p2.move <- "none";
 
-    if p1_up || p1_dn
-    then if (p1_up && not p1_dn) || (p1_up && p1_dn && p1_last = "U")
-      then the.game.p1_move <- "up"
-      else the.game.p1_move <- "down";
+    if is_moving_up_1 || is_moving_dn_1
+    then if (is_moving_up_1 && not is_moving_dn_1) || (is_moving_up_1 && is_moving_dn_1 && last_1 = "U")
+      then the.game.p1.move <- "up"
+      else the.game.p1.move <- "down";
 
-    if p2_up || p2_dn
-    then if (p2_up && not p2_dn) || (p2_up && p2_dn && p2_last = "U")
-      then the.game.p2_move <- "up"
-      else the.game.p2_move <- "down";
+    if is_moving_up_2 || is_moving_dn_2
+    then if (is_moving_up_2 && not is_moving_dn_2) || (is_moving_up_2 && is_moving_dn_2 && last_2 = "U")
+      then the.game.p2.move <- "up"
+      else the.game.p2.move <- "down";
 
   );
 
@@ -506,8 +509,8 @@ let render_state state =
 
   draw_scrolled_background state;
 
-  draw_paddle paddle_padding state.p1_pos state.p1_is_computer;
-  draw_paddle (the.field.width - paddle_padding) state.p2_pos state.p2_is_computer;
+  draw_paddle paddle_padding state.p1.pos state.p1.is_computer;
+  draw_paddle (the.field.width - paddle_padding) state.p2.pos state.p2.is_computer;
 
   let bx, by = state.ball
   in
@@ -547,8 +550,8 @@ let rec paddle_state statename newstate =
 
 
 let set_computer_p1 () =
-  the.game.p1_is_computer <- not the.game.p1_is_computer;
-  if the.game.p1_is_computer then
+  the.game.p1.is_computer <- not the.game.p1.is_computer;
+  if the.game.p1.is_computer then
     log "P1 -> computer"
   else
     log "P1 -> human";
@@ -557,8 +560,8 @@ let set_computer_p1 () =
 
 
 let set_computer_p2 () =
-  the.game.p2_is_computer <- not the.game.p2_is_computer;
-  if the.game.p2_is_computer then
+  the.game.p2.is_computer <- not the.game.p2.is_computer;
+  if the.game.p2.is_computer then
     log "P2 -> computer"
   else
     log "P2 -> human";
@@ -587,16 +590,16 @@ let rec process_events () =
                 if k.keystate = PRESSED then toggle_debug ();
             | K_A ->
                 paddle_state "1U" ( k.keystate = PRESSED );
-                the.game.p1_is_computer <- false;
+                the.game.p1.is_computer <- false;
             | K_Z ->
                 paddle_state "1D" ( k.keystate = PRESSED );
-                the.game.p1_is_computer <- false;
+                the.game.p1.is_computer <- false;
             | K_K | K_UP ->
                 paddle_state "2U" ( k.keystate = PRESSED );
-                the.game.p2_is_computer <- false;
+                the.game.p2.is_computer <- false;
             | K_M | K_DOWN ->
                 paddle_state "2D" ( k.keystate = PRESSED );
-                the.game.p2_is_computer <- false;
+                the.game.p2.is_computer <- false;
             | _ -> ()
     )
     | Button b ->
