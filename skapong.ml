@@ -10,9 +10,16 @@ open Glcaml
 
 open Common
 open Debug
-open Checked
 
 open Bff
+
+
+open Checked
+let (+) = Checked.plus32
+let (-) = Checked.minus32
+let ( * ) = Checked.mul32
+let (==) a b = raise (UndesirableFeature)
+let (!=) a b = raise (UndesirableFeature)
 
 
 (* all size measurements are in millimeters *)
@@ -21,6 +28,7 @@ let paddle_padding = dimension_cm 15
 
 (* paddle movement distance in 1s *)
 let paddle_speed = dimension_cm 400
+
 
 type playerstate =
   { mutable pos: dimension (* vertical center *)
@@ -36,7 +44,7 @@ type gamestate =
   ; mutable p1: playerstate
   ; mutable p2: playerstate
 
-  ; mutable state:   string (* play / stop *)
+  ; mutable state:   string (* play / stop / gameover *)
   }
 
 
@@ -54,7 +62,7 @@ let gamestate_clean =
          ; move = "none"
          ; is_computer = true
          }
-  ; state   = "stop"
+  ; state   = "gameover"
   }
 
 
@@ -99,7 +107,7 @@ let reasonable_starting_angle () =
   if a < 0 then a + 360 else a
 
 let start_game () =
-  if the.game.state = "stop" then (
+  if the.game.state = "gameover" || the.game.state = "stop" then (
     the.game.ball  <- half the.field.width, half the.field.height;
     the.game.vector <- make_vector (reasonable_starting_angle ()) (dimension_m 3);
     the.game.state <- "play";
@@ -149,7 +157,7 @@ let initialize_video () = (* {{{ *)
     set_attribute DOUBLEBUFFER 1;
 
     ignore( set_video_mode the.screen.width the.screen.height 0 flags );
-    Video.show_cursor the.fullscreen;
+    Video.show_cursor (not the.fullscreen);
 
   in
 
@@ -413,7 +421,10 @@ let calc_next_state os advance_ms =
       end;
       log "[space] to start";
       ns.ball <- half the.field.width, half the.field.height;
-      ns.state <- "stop";
+
+      if ns.p1.score <> 15 && ns.p2.score <> 15
+      then ns.state <- "stop"
+      else ns.state <- "gameover";
     end;
 
     ns
@@ -519,12 +530,13 @@ let start_text_layer () =
 let draw_score state =
   glColor3f 0.2 0.4 0.4;
   sprintf "%d" state.p1.score $ scorefont#print 200 530;
-  sprintf "%d" state.p2.score $ scorefont#print 600 530;
+  sprintf "%d" state.p2.score $ scorefont#print 550 530;
   ()
 
 let draw_instructions state =
 
-  if state.p1.score = 15 || state.p2.score = 15 || (state.p1.score = 0 && state.p2.score = 0) then begin
+  if state.state = "gameover" then
+  begin
     f48#print 200 430 "SKAPONG";
     "Press SPACE to start a new game." $ f36#print 200 400;
     [ " Keys:"
@@ -532,10 +544,14 @@ let draw_instructions state =
     ; "  UP, DOWN: second player movement,"
     ; "  1: switch player/computer mode for the first player,"
     ; "  2: switch player/computer mode for the second player,"
+    ; "  F: toggle fullscreen,"
     ; "  D: debug messages on/off,"
     ; "  ESC: stop / quit."] $ f21#print_lines 200 360;
-  end else begin
-    "Press SPACE to start a game." $ f36#print 200 400;
+    f13#print 200 10 "Written by Einar Lielmanis, einar@spicausis.lv. bugpipe.com";
+  end
+  else if state.state = "stop" then
+  begin
+    "Press SPACE to launch ball." $ f36#print 200 400;
   end
 
 let render_state state =
@@ -550,7 +566,7 @@ let render_state state =
   draw_paddle paddle_padding state.p1.pos state.p1.is_computer;
   draw_paddle (the.field.width - paddle_padding) state.p2.pos state.p2.is_computer;
 
-  if state.state = "play" then draw_ball state;
+  if state.state <> "gameover" then draw_ball state;
 
 
   (* ortho 800x600 *)
@@ -565,7 +581,7 @@ let render_state state =
 
   draw_score state;
 
-  if state.state = "stop" then draw_instructions state;
+  draw_instructions state;
 
   swap_buffers ();
 
@@ -592,9 +608,7 @@ let set_computer_p1 () =
   if the.game.p1.is_computer then
     log "P1 -> computer"
   else
-    log "P1 -> human";
-
-  the.game.state <- "play"
+    log "P1 -> human"
 
 
 let set_computer_p2 () =
@@ -602,8 +616,7 @@ let set_computer_p2 () =
   if the.game.p2.is_computer then
     log "P2 -> computer"
   else
-    log "P2 -> human";
-  the.game.state <- "play"
+    log "P2 -> human"
 
 
 exception No_more_events
@@ -616,7 +629,7 @@ let rec process_events () =
             | K_ESCAPE ->
                 if k.keystate = PRESSED then
                 if the.game.state = "play" then
-                  the.game.state <- "stop"
+                  the.game.state <- "gameover"
                 else begin
                   Sdl.quit ();
                   exit 0;
@@ -627,6 +640,8 @@ let rec process_events () =
                   then toggle_fullscreen ()
                   else start_game ();
                 end;
+            | K_F ->
+                if k.keystate = PRESSED then toggle_fullscreen ();
             | K_1 ->
                 if k.keystate = PRESSED then set_computer_p1 ();
             | K_2 ->
