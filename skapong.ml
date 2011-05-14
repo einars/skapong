@@ -551,7 +551,7 @@ let draw_instructions state =
   end
   else if state.state = "stop" then
   begin
-    "Press SPACE to launch ball." $ f36#print 200 400;
+    "Press SPACE to launch ball." $ f36#print 240 400;
   end
 
 let render_state state =
